@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      var coverSupport = 'CSS' in window && 'supports' in window.CSS && window.CSS.supports('top: var(--status-bar-height)')
+      if (coverSupport) {
+        document.documentElement.style.setProperty('--status-bar-height', '25px')
+      }
+    </script>
+    <title>AI 智检系统</title>
+    <!--preload-links-->
+    <!--app-context-->
+  </head>
+  <body>
+    <div id="app"><!--app-html--></div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

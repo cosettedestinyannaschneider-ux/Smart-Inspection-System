@@ -1,0 +1,37 @@
+name: 功能需求
+description: 新功能、阶段任务或流程增强
+title: "[Feature] "
+labels:
+  - feature
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: 说明当前问题、业务背景或阶段目标
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标
+      description: 说明希望最终达成的结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      description: 说明本次应包含和不应包含的内容
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 用可以检查的方式描述完成条件
+    validations:
+      required: true

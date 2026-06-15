@@ -1,0 +1,39 @@
+# 依赖
+node_modules/
+
+# 环境变量（含密钥）
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# 上传文件与报告
+uploads/
+
+# 编译产物
+unpackage/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 临时转换文件
+template_converted.docx
+template_unpacked/
+~$*
+
+# 本地真实数据库备份与验收截图（含业务数据或隐私）
+project/database/ai_project_*.sql
+project/*.png
+
+# 私钥与证书密钥
+*.pem
+*.key

@@ -1,0 +1,26 @@
+{
+  "name": "AI 智检系统",
+  "appid": "__UNI__CAC73C0",
+  "description": "基于 uni-app 的 AI 智检系统多端前端",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "vueVersion": "3",
+  "h5": {
+    "title": "AI 智检系统",
+    "router": {
+      "mode": "hash",
+      "base": "./"
+    }
+  },
+  "mp-weixin": {
+    "appid": "wxf6e6e6e6e6e6e6e6",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true
+    },
+    "usingComponents": true
+  }
+}

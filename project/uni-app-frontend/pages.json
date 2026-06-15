@@ -1,0 +1,22 @@
+{
+  "pages": [
+    { "path": "pages/login/login", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
+    { "path": "pages/process/process", "style": { "navigationBarTitleText": "智检分析", "navigationStyle": "custom" } },
+    { "path": "pages/workbench/workbench", "style": { "navigationBarTitleText": "工作台", "navigationStyle": "custom" } },
+    { "path": "pages/admin/users", "style": { "navigationBarTitleText": "用户管理", "navigationStyle": "custom" } },
+    { "path": "pages/admin/knowledge", "style": { "navigationBarTitleText": "知识库管理", "navigationStyle": "custom" } },
+    { "path": "pages/admin/model-config", "style": { "navigationBarTitleText": "AI模型配置", "navigationStyle": "custom" } },
+    { "path": "pages/admin/logs", "style": { "navigationBarTitleText": "操作日志", "navigationStyle": "custom" } },
+    { "path": "pages/admin/enterprises", "style": { "navigationBarTitleText": "企业数据查询", "navigationStyle": "custom" } },
+    { "path": "pages/admin/templates", "style": { "navigationBarTitleText": "报告模板", "navigationStyle": "custom" } },
+    { "path": "pages/admin/backup", "style": { "navigationBarTitleText": "数据备份", "navigationStyle": "custom" } },
+    { "path": "pages/history/history", "style": { "navigationBarTitleText": "历史存档" } },
+    { "path": "pages/settings/settings", "style": { "navigationBarTitleText": "服务器设置" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "智检系统",
+    "navigationBarBackgroundColor": "#1677FF",
+    "backgroundColor": "#f4f7f9"
+  }
+}
