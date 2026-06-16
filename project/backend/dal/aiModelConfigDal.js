@@ -1,5 +1,18 @@
 const db = require('./db')
 
+/** 允许写入的数据库字段白名单，防止任意字段直接拼接 SQL */
+const ALLOWED_COLUMNS = new Set([
+  'name',
+  'provider',
+  'base_url',
+  'api_key_encrypted',
+  'model_name',
+  'max_tokens',
+  'temperature',
+  'timeout_ms',
+  'is_active',
+])
+
 const aiModelConfigDal = {
   async findActive() {
     const [rows] = await db.execute(
@@ -19,11 +32,21 @@ const aiModelConfigDal = {
   },
 
   async create(params) {
-    const { name, baseUrl, apiKeyEncrypted, modelName, maxTokens = 4096, temperature = 0.7, timeoutMs = 60000, isActive = 0 } = params
+    const {
+      name,
+      provider,
+      baseUrl,
+      apiKeyEncrypted,
+      modelName,
+      maxTokens = 4096,
+      temperature = 0.7,
+      timeoutMs = 60000,
+      isActive = 0,
+    } = params
     const [res] = await db.execute(
-      `INSERT INTO ai_model_configs (name, base_url, api_key_encrypted, model_name, max_tokens, temperature, timeout_ms, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, baseUrl, apiKeyEncrypted, modelName, maxTokens, temperature, timeoutMs, isActive]
+      `INSERT INTO ai_model_configs (name, provider, base_url, api_key_encrypted, model_name, max_tokens, temperature, timeout_ms, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, provider, baseUrl, apiKeyEncrypted, modelName, maxTokens, temperature, timeoutMs, isActive]
     )
     return res.insertId
   },
@@ -32,7 +55,8 @@ const aiModelConfigDal = {
     const fields = []
     const values = []
     for (const [k, v] of Object.entries(params)) {
-      const col = k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase())
+      const col = String(k || '').trim()
+      if (!ALLOWED_COLUMNS.has(col)) continue
       fields.push(`${col} = ?`)
       values.push(v)
     }
@@ -42,8 +66,18 @@ const aiModelConfigDal = {
   },
 
   async setActive(id) {
-    await db.execute('UPDATE ai_model_configs SET is_active = 0')
-    await db.execute('UPDATE ai_model_configs SET is_active = 1 WHERE id = ?', [id])
+    const connection = await db.getConnection()
+    try {
+      await connection.beginTransaction()
+      await connection.execute('UPDATE ai_model_configs SET is_active = 0')
+      await connection.execute('UPDATE ai_model_configs SET is_active = 1 WHERE id = ?', [id])
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
   },
 
   async deleteById(id) {

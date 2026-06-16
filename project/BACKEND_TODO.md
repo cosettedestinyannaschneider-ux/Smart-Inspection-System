@@ -188,24 +188,24 @@
 
 ### 2. AI 模型配置联调
 
-- **状态**：待联调与安全整改
+- **状态**：已完成第二阶段安全基线与真实联调
 - **前端页面**：`pages/admin/model-config.vue`
 - **当前实现**：支持模型概览、新增、编辑、启用切换和删除；API Key 仅展示脱敏内容。
 
 | 接口 | 当前状态 | 后端调整或确认事项 | 前端替换位置 |
 |---|---|---|---|
-| `POST /api/admin/config/ai/list` | 待调整 | 列表禁止返回原始 `api_key_encrypted`，统一返回 `api_key_masked` | `fetchModels` |
-| `POST /api/admin/config/ai/add` | 待调整 | 接收并持久化 `provider`；API Key 必须加密后入库 | `saveModel` 新增分支 |
-| `POST /api/admin/config/ai/update` | 待调整 | API Key 留空时保持原值；限制可更新字段，禁止任意列更新 | `saveModel` 编辑分支 |
-| `POST /api/admin/config/ai/activate` | 待联调 | 参数为 `id`；切换过程应使用事务保证仅一个启用模型 | `activate` |
-| `POST /api/admin/config/ai/delete` | 待调整 | 后端禁止删除当前启用模型 | `deleteModel` |
+| `POST /api/admin/config/ai/list` | 已完成 | 列表返回脱敏 `api_key_masked`，不再暴露原始密钥字段 | `fetchModels` |
+| `POST /api/admin/config/ai/add` | 已完成 | 接收并持久化 `provider`；API Key 使用 AES-256-GCM 加密后入库 | `saveModel` 新增分支 |
+| `POST /api/admin/config/ai/update` | 已完成 | API Key 留空时保持原值；更新字段受白名单限制 | `saveModel` 编辑分支 |
+| `POST /api/admin/config/ai/activate` | 已完成 | 参数为 `id`；事务切换保证仅一个启用模型 | `activate` |
+| `POST /api/admin/config/ai/delete` | 已完成 | 后端禁止删除当前启用模型 | `deleteModel` |
 
 #### AI 配置安全整改
 
-- 当前 `api_key_encrypted` 字段写入的是请求中的原值，尚未真正加密，必须在后端接入加密与解密模块。
-- 当前列表查询使用 `SELECT *`，会返回 API Key 存储字段；必须改为白名单字段查询并返回脱敏值。
-- 当前更新接口会将请求参数动态转换为列名，必须改为允许字段白名单，防止越权修改数据库列。
-- `provider` 为第二阶段前端需要的服务商展示字段，后端与数据库需补充该字段。
+- 已接入模型配置加密与解密模块，新增 `MODEL_CONFIG_SECRET` 环境变量。
+- 已实现“读时识别、写时迁移”：历史明文记录在配置好 `MODEL_CONFIG_SECRET` 后会自动迁移为密文。
+- 列表与当前配置接口只返回 `api_key_masked`，不再向前端暴露可还原密钥。
+- 前端模型配置页面已切换为真实接口，不再依赖 mock 数据。
 
 ### 3. 第二阶段数据库变更登记
 

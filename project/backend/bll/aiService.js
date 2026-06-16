@@ -10,7 +10,7 @@ const fs = require('fs')
 const pdfParse = require('pdf-parse')
 const historyDal = require('../dal/historyDal')
 const sessionDal = require('../dal/sessionDal')
-const aiModelConfigDal = require('../dal/aiModelConfigDal')
+const modelConfigService = require('./modelConfigService')
 const C = require('../common/Constants')
 require('dotenv').config()
 
@@ -52,14 +52,14 @@ const getEnvClientConfig = () => ({
  * @returns {Promise<{client: OpenAI, modelName: string, configId: number|null}>}
  */
 const getActiveClient = async () => {
-  const config = await aiModelConfigDal.findActive()
+  const config = await modelConfigService.getActiveRuntimeConfig()
   if (config && hasUsableClientConfig({
     baseUrl: config.base_url,
-    apiKey: config.api_key_encrypted,
+    apiKey: config.api_key_plain,
     modelName: config.model_name,
   })) {
     return {
-      client: createClient(config.base_url, config.api_key_encrypted),
+      client: createClient(config.base_url, config.api_key_plain),
       modelName: config.model_name,
       configId: config.id,
     }
@@ -78,17 +78,17 @@ const getActiveClient = async () => {
  * @returns {Promise<{client: OpenAI, modelName: string, configId: number}>}
  */
 const getClientById = async (modelId) => {
-  const config = await aiModelConfigDal.findById(modelId)
+  const config = await modelConfigService.getRuntimeConfigById(modelId)
   if (!config) throw new Error('模型配置不存在')
   if (!hasUsableClientConfig({
     baseUrl: config.base_url,
-    apiKey: config.api_key_encrypted,
+    apiKey: config.api_key_plain,
     modelName: config.model_name,
   })) {
     throw new Error('当前所选模型配置无效，请检查 API 地址、API Key 和模型 ID')
   }
   return {
-    client: createClient(config.base_url, config.api_key_encrypted),
+    client: createClient(config.base_url, config.api_key_plain),
     modelName: config.model_name,
     configId: config.id,
   }
