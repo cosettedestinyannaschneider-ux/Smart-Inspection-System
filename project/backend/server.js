@@ -6,6 +6,7 @@ const path = require('path')
 
 // ---- 业务层 ----
 const userService = require('./bll/userService')
+const authService = require('./bll/authService')
 const aiService = require('./bll/aiService')
 const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
@@ -29,6 +30,8 @@ const { responseMiddleware } = require('./common/Result')
 const { ErrorCode, ErrorMessage } = require('./common/ErrorCode')
 const C = require('./common/Constants')
 const adminAuth = require('./middleware/adminAuth')
+const requireAuth = require('./middleware/requireAuth')
+const requirePermission = require('./middleware/requirePermission')
 const adminUserRoutes = require('./routes/admin/userRoutes')
 const adminEnterpriseRoutes = require('./routes/admin/enterpriseRoutes')
 const adminDepartmentRoutes = require('./routes/admin/departmentRoutes')
@@ -149,9 +152,36 @@ app.post('/api/login', async (req, res) => {
       return res.fail(code, result.message)
     }
     await logDal.logAction(result.user.id, C.ACTION_LOGIN, { username })
-    res.success(result.user)
+    const loginPayload = await authService.createLoginSession({
+      userId: result.user.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] || null,
+    })
+    res.success(loginPayload)
   } catch (err) {
     console.error('[Server] login error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  try {
+    const currentUser = await authService.getCurrentAuthUser(req.auth.userId)
+    if (!currentUser) return res.fail(ErrorCode.UNAUTHORIZED, '当前登录已失效，请重新登录')
+    res.success({ user: currentUser })
+  } catch (err) {
+    console.error('[Server] auth/me error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+app.post('/api/logout', requireAuth, async (req, res) => {
+  try {
+    await authService.logoutByJti(req.auth.jti)
+    await logDal.logAction(req.auth.userId, C.ACTION_LOGOUT, { jti: req.auth.jti }, req.ip)
+    res.success(null, '已退出登录')
+  } catch (err) {
+    console.error('[Server] logout error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR)
   }
 })

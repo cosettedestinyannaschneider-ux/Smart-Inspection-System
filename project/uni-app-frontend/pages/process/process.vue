@@ -348,7 +348,7 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { apiUrl, assetUrl, normalizeUser } from '../../common/api-config'
+import { apiUrl, assetUrl, clearLoginSession, getStoredUser, request } from '../../common/api-config'
 
 const user = ref({})
 const prompt = ref('')
@@ -464,7 +464,7 @@ const saveEditResult = (msg) => {
 }
 
 onMounted(() => {
-  const storedUser = normalizeUser(uni.getStorageSync('user'))
+  const storedUser = getStoredUser()
   if (storedUser && storedUser.id) {
     user.value = storedUser
     fetchModelList()
@@ -472,7 +472,7 @@ onMounted(() => {
     fetchEnterpriseInfo()
     fetchHazardImages()
   } else {
-    uni.removeStorageSync('user')
+    clearLoginSession()
     uni.reLaunch({ url: '/pages/login/login' })
   }
 })
@@ -978,8 +978,13 @@ const handleDownload = (path) => {
 }
 
 const handleLogout = () => {
-  uni.removeStorageSync('user')
-  uni.reLaunch({ url: '/pages/login/login' })
+  request({
+    url: apiUrl('/api/logout'),
+    method: 'POST',
+  }).finally(() => {
+    clearLoginSession()
+    uni.reLaunch({ url: '/pages/login/login' })
+  })
 }
 
 const toggleUserMenu = () => {

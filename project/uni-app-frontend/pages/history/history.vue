@@ -1,25 +1,25 @@
 <template>
   <view class="container">
     <view class="card">
-      <text class="section-title">历史分析记录</text>
-      <view v-if="historyList.length === 0" class="no-data">暂无记录</view>
+      <text class="section-title">鍘嗗彶鍒嗘瀽璁板綍</text>
+      <view v-if="historyList.length === 0" class="no-data">鏆傛棤璁板綍</view>
       <view v-else class="history-list">
         <view v-for="item in historyList" :key="item.id" class="history-item card">
           <view class="item-header">
             <text class="item-time">{{ formatDate(item.created_at) }}</text>
             <view class="item-badge" :class="item.image_path ? 'badge-image' : 'badge-text'">
-              {{ item.image_path ? '图文' : '纯文本' }}
+              {{ item.image_path ? '鍥炬枃' : '绾枃鏈?' }}
             </view>
           </view>
-          <text class="item-prompt">提示：{{ item.prompt }}</text>
+          <text class="item-prompt">鎻愮ず锛歿{ item.prompt }}</text>
           <view class="item-result-preview">
             <text class="item-result">{{ item.result.substring(0, 100) }}...</text>
           </view>
           <view class="item-actions">
             <button class="mini-btn dl-btn" @click="handleDownload(item.word_path)">Word</button>
             <button class="mini-btn dl-btn" @click="handleDownload(item.pdf_path)">PDF</button>
-            <button class="mini-btn view-btn" @click="handleViewDetail(item)">查看全文</button>
-            <button class="mini-btn delete-btn" @click="handleDelete(item)">删除</button>
+            <button class="mini-btn view-btn" @click="handleViewDetail(item)">鏌ョ湅鍏ㄦ枃</button>
+            <button class="mini-btn delete-btn" @click="handleDelete(item)">鍒犻櫎</button>
           </view>
         </view>
       </view>
@@ -29,35 +29,31 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { apiUrl, assetUrl, normalizeUser } from '../../common/api-config'
+import { apiUrl, assetUrl, clearLoginSession, downloadFile, getStoredUser, request } from '../../common/api-config'
 
 const historyList = ref([])
 const user = ref({})
 
 onMounted(() => {
-  const storedUser = normalizeUser(uni.getStorageSync('user'))
+  const storedUser = getStoredUser()
   if (storedUser && storedUser.id) {
     user.value = storedUser
     fetchHistory()
   } else {
-    uni.removeStorageSync('user')
+    clearLoginSession()
     uni.reLaunch({ url: '/pages/login/login' })
   }
 })
 
 const fetchHistory = () => {
-  uni.request({
+  request({
     url: apiUrl(`/api/history/${user.value.id}`),
     method: 'GET',
-    success: (res) => {
-      const data = res.data
-      if (data.success) {
-        historyList.value = data.data
-      }
-    },
-    fail: () => {
-      uni.showToast({ title: '加载失败', icon: 'none' })
-    }
+  }).then((res) => {
+    const data = res.data
+    if (data.success) historyList.value = data.data
+  }).catch(() => {
+    uni.showToast({ title: '鍔犺浇澶辫触', icon: 'none' })
   })
 }
 
@@ -69,20 +65,20 @@ const formatDate = (dateStr) => {
 const handleDownload = (path) => {
   if (!path) return
   const url = assetUrl(path)
-  
+
   // #ifdef H5
   window.open(url)
   // #endif
-  
+
   // #ifndef H5
-  uni.downloadFile({
-    url: url,
+  downloadFile({
+    url,
     success: (res) => {
       if (res.statusCode === 200) {
         uni.openDocument({
           filePath: res.tempFilePath,
-          success: () => console.log('打开成功'),
-          fail: () => uni.showToast({ title: '打开失败', icon: 'none' })
+          success: () => console.log('鎵撳紑鎴愬姛'),
+          fail: () => uni.showToast({ title: '鎵撳紑澶辫触', icon: 'none' })
         })
       }
     }
@@ -92,36 +88,32 @@ const handleDownload = (path) => {
 
 const handleViewDetail = (item) => {
   uni.showModal({
-    title: '分析结果全文',
+    title: '鍒嗘瀽缁撴灉鍏ㄦ枃',
     content: item.result,
     showCancel: false
   })
 }
 
-/**
- * 9.7 报告管理：删除单条记录（同时清理生成的报告文件）
- * @param {{id:number}} item
- */
 const handleDelete = (item) => {
   if (!item?.id) return
   uni.showModal({
-    title: '确认删除',
-    content: '删除后无法恢复，且会同时删除生成的 Word/PDF 报告文件',
+    title: '纭鍒犻櫎',
+    content: '鍒犻櫎鍚庢棤娉曟仮澶嶏紝涓斾細鍚屾椂鍒犻櫎鐢熸垚鐨?Word/PDF 鎶ュ憡鏂囦欢',
     success: (res) => {
       if (!res.confirm) return
-      uni.request({
+      request({
         url: apiUrl('/api/history/delete'),
         method: 'POST',
         data: { user_id: user.value.id, id: item.id },
-        success: (res) => {
-          if (res.data?.success) {
-            uni.showToast({ title: '已删除' })
-            fetchHistory()
-          } else {
-            uni.showToast({ title: res.data?.message || '删除失败', icon: 'none' })
-          }
-        },
-        fail: () => uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+      }).then((response) => {
+        if (response.data?.success) {
+          uni.showToast({ title: '宸插垹闄?' })
+          fetchHistory()
+        } else {
+          uni.showToast({ title: response.data?.message || '鍒犻櫎澶辫触', icon: 'none' })
+        }
+      }).catch(() => {
+        uni.showToast({ title: '缃戠粶閿欒锛岃绋嶅悗閲嶈瘯', icon: 'none' })
       })
     }
   })
