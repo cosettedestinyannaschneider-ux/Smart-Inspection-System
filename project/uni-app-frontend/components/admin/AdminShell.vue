@@ -50,7 +50,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { normalizeUser } from '../../common/api-config'
+import { apiUrl, clearLoginSession, getStoredUser, request } from '../../common/api-config'
 
 /** 页面参数 */
 const props = defineProps({
@@ -80,7 +80,7 @@ const menuItems = [
 /** 初始化时统一校验管理员身份 */
 onMounted(() => {
   /** 本地存储中的当前登录用户 */
-  const user = normalizeUser(uni.getStorageSync('user'))
+  const user = getStoredUser()
   if (!user || user.role !== 'admin' || !user.id) {
     uni.reLaunch({ url: '/pages/login/login' })
     return
@@ -111,8 +111,13 @@ const handleLogout = () => {
     content: '确定退出当前管理员账号吗？',
     success: (result) => {
       if (!result.confirm) return
-      uni.removeStorageSync('user')
-      uni.reLaunch({ url: '/pages/login/login' })
+      request({
+        url: apiUrl('/api/logout'),
+        method: 'POST',
+      }).finally(() => {
+        clearLoginSession()
+        uni.reLaunch({ url: '/pages/login/login' })
+      })
     }
   })
 }

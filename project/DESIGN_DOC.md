@@ -50,7 +50,8 @@
 
 ### 3.2 后端应用层（Node.js / Express）
 
-- **RBAC 权限控制**：管理员接口强制鉴权；普通用户数据按 `create_user_id` 隔离。
+- **认证机制**：登录态采用 `Access JWT + auth_sessions`，兼顾 H5 / 小程序统一接入、服务端撤销、禁用账号即时失效与审计留痕。
+- **RBAC 权限控制**：管理员接口强制鉴权；普通用户数据隔离的目标以服务端认证上下文为准，当前旧接口仍处于从 `user_id` 传参向 Bearer Token 过渡阶段。
 - **AI 调度**：openai SDK 统一对接多模型（DeepSeek/豆包/阿里千问），前端可选择模型。
 - **知识库检索**：MySQL LIKE / 全文索引关键词匹配，不使用向量检索。
 - **报告生成引擎**：docx + docx-templater 模板化生成 Word，pdfkit 生成 PDF。
@@ -58,7 +59,7 @@
 
 ### 3.3 数据层（MySQL + 本地文件）
 
-- **MySQL**：`ai_project` 库，14 张业务表（enterprises/departments/users/user_permissions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/action_logs/ai_model_configs/report_templates/backup_records），待新增 knowledge_clauses 和 analysis_tasks。
+- **MySQL**：`ai_project` 库，15 张业务表（enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/action_logs/ai_model_configs/report_templates/backup_records），后续待新增 `knowledge_clauses` 等结构化知识表。
 - **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`。
 
 ## 4. 双角色架构
@@ -68,7 +69,7 @@
 - 只有 **一个企业**，自动关联
 - 核心流程：上传隐患图片 → 勾选 → AI 分析 → 查看结果 → 生成报告
 - 侧边栏：企业信息 / 隐患图片库 / 历史对话 / 知识库查阅 / 我的操作记录
-- 数据隔离：仅查看 `create_user_id = 自身` 的数据
+- 数据隔离：目标状态为仅查看“当前登录用户自身数据”，后端逐步从 `user_id` 传参迁移到 `req.auth.userId`
 - 权限由管理员分配（企业信息管理/图片管理/AI分析/报告下载/知识库查看）
 
 ### 管理员
@@ -124,7 +125,7 @@ pages/
 ### 数据隔离
 
 - 管理员：查询全部数据
-- 普通用户：仅查询 `create_user_id = 自身` 的数据（企业、图片、分析、报告）
+- 普通用户：仅查询当前登录用户自身的数据（企业、图片、分析、报告）；当前部分旧接口仍保留兼容参数，后续统一以后端鉴权结果为准
 
 ### 企业、部门与用户组织关系
 

@@ -1,14 +1,7 @@
 /**
- * 统一错误码体系
- * 规范：code 为 4 位数字，按模块分段
- *   0     — 成功
- *   1xxx  — 认证/授权
- *   2xxx  — 参数校验
- *   3xxx  — 业务逻辑
- *   4xxx  — 资源不存在
- *   5xxx  — 服务器内部错误
- *
- * @created 2026-05-18
+ * 统一错误码体系。
+ * 0 为成功，1xxx 为认证授权，2xxx 为参数校验，3xxx 为业务逻辑，
+ * 4xxx 为资源不存在，5xxx 为服务端内部错误。
  */
 const ErrorCode = {
   // 成功
@@ -34,6 +27,7 @@ const ErrorCode = {
   REPORT_GENERATE_FAILED: 3002,
   IMAGE_PROCESS_FAILED: 3003,
   SESSION_EXPIRED: 3004,
+  AUTH_SESSION_REVOKED: 3005,
 
   // ---- 资源 4xxx ----
   NOT_FOUND: 4001,
@@ -41,19 +35,17 @@ const ErrorCode = {
   IMAGE_NOT_FOUND: 4003,
   RECORD_NOT_FOUND: 4004,
 
-  // ---- 服务器 5xxx ----
+  // ---- 服务端 5xxx ----
   INTERNAL_ERROR: 5001,
   DATABASE_ERROR: 5002,
   FILE_SYSTEM_ERROR: 5003,
 }
 
-/**
- * 错误码 → 可读消息映射
- */
+/** 错误码到用户可读提示的映射 */
 const ErrorMessage = {
   [ErrorCode.SUCCESS]: 'ok',
 
-  [ErrorCode.UNAUTHORIZED]: '未登录或登录已过期',
+  [ErrorCode.UNAUTHORIZED]: '未登录或登录已失效',
   [ErrorCode.LOGIN_FAILED]: '用户名或密码错误',
   [ErrorCode.ACCOUNT_LOCKED]: '账户已被锁定，请稍后再试',
   [ErrorCode.ACCOUNT_DISABLED]: '账户已被禁用',
@@ -69,7 +61,8 @@ const ErrorMessage = {
   [ErrorCode.AI_SERVICE_ERROR]: 'AI 服务暂时不可用',
   [ErrorCode.REPORT_GENERATE_FAILED]: '报告生成失败',
   [ErrorCode.IMAGE_PROCESS_FAILED]: '图片处理失败',
-  [ErrorCode.SESSION_EXPIRED]: '会话已过期',
+  [ErrorCode.SESSION_EXPIRED]: '登录状态已过期',
+  [ErrorCode.AUTH_SESSION_REVOKED]: '登录已退出或已被禁用',
 
   [ErrorCode.NOT_FOUND]: '资源不存在',
   [ErrorCode.USER_NOT_FOUND]: '用户不存在',

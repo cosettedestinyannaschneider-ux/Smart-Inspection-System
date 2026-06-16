@@ -19,6 +19,7 @@ const schemaInit = {
     await this.step01_departments()
     await this.step02_users()
     await this.step02UserPermissions()
+    await this.step02AuthSessions()
     await this.step04_sessions()
     await this.step05_inspectionReports()
     await this.step07_hazardImages()
@@ -160,6 +161,36 @@ const schemaInit = {
         PRIMARY KEY (user_id, permission_key),
         KEY idx_user_permissions_permission_key (permission_key),
         CONSTRAINT fk_user_permissions_user
+          FOREIGN KEY (user_id) REFERENCES users (id)
+          ON DELETE CASCADE ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+  },
+
+  // =========================================================================
+  // Step 2.2: 认证会话表
+  // =========================================================================
+  async step02AuthSessions() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id            INT           NOT NULL AUTO_INCREMENT,
+        jti           VARCHAR(64)   NOT NULL,
+        user_id       INT           NOT NULL,
+        role_snapshot VARCHAR(20)   NOT NULL,
+        status        ENUM('active','revoked','expired') NOT NULL DEFAULT 'active',
+        expires_at    DATETIME      NOT NULL,
+        revoked_at    DATETIME      DEFAULT NULL,
+        last_seen_at  DATETIME      DEFAULT NULL,
+        last_ip       VARCHAR(45)   DEFAULT NULL,
+        user_agent    VARCHAR(500)  DEFAULT NULL,
+        created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_auth_sessions_jti (jti),
+        KEY idx_auth_sessions_user_id (user_id),
+        KEY idx_auth_sessions_status (status),
+        KEY idx_auth_sessions_expires_at (expires_at),
+        CONSTRAINT fk_auth_sessions_user
           FOREIGN KEY (user_id) REFERENCES users (id)
           ON DELETE CASCADE ON UPDATE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

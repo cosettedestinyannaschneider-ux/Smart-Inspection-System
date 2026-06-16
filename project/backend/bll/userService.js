@@ -7,6 +7,7 @@
  */
 const userDal = require('../dal/userDal')
 const userPermissionDal = require('../dal/userPermissionDal')
+const authSessionDal = require('../dal/authSessionDal')
 const departmentDal = require('../dal/departmentDal')
 const logDal = require('../dal/logDal')
 const db = require('../dal/db')
@@ -250,6 +251,9 @@ const userService = {
       await connection.beginTransaction()
       await userDal.updateUser(id, username, nextPassword, role, departmentId, status, connection)
       await userPermissionDal.replaceForUser(id, permissionKeys, connection)
+      if (status === C.STATUS_DISABLED) {
+        await authSessionDal.revokeActiveByUserId(id, connection)
+      }
       await logDal.logAction(adminId, C.ACTION_ADMIN_UPDATE_USER, { target_id: id, username, role, department_id: departmentId, status: status || target.status }, ipAddress, connection)
       await logDal.logAction(adminId, C.ACTION_ADMIN_UPDATE_USER_PERMISSIONS, { target_id: id, permissions: permissionKeys }, ipAddress, connection)
       await connection.commit()
@@ -273,7 +277,18 @@ const userService = {
     if (Number(adminId) === Number(targetId)) throw businessError('禁止禁用当前登录管理员')
     const target = await userDal.findById(targetId)
     if (!target) throw businessError('用户不存在')
-    await userDal.deleteUser(targetId)
+    const connection = await db.getConnection()
+    try {
+      await connection.beginTransaction()
+      await userDal.deleteUser(targetId)
+      await authSessionDal.revokeActiveByUserId(Number(targetId), connection)
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
     return { success: true }
   },
 }

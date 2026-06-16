@@ -93,7 +93,33 @@ CREATE TABLE user_permissions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户权限关联表';
 
 -- ============================================================================
--- 5. 隐患图片表（立项书 §四(五) 隐患图片上传与处理模块 + §9.5）
+-- 5. 认证会话表（JWT 撤销、在线状态与审计）
+-- ============================================================================
+CREATE TABLE auth_sessions (
+  id              INT           NOT NULL AUTO_INCREMENT,
+  jti             VARCHAR(64)   NOT NULL COMMENT 'JWT 唯一标识',
+  user_id         INT           NOT NULL COMMENT '所属用户',
+  role_snapshot   VARCHAR(20)   NOT NULL COMMENT '登录时角色快照',
+  status          ENUM('active','revoked','expired') NOT NULL DEFAULT 'active' COMMENT '认证会话状态',
+  expires_at      DATETIME      NOT NULL COMMENT '访问令牌过期时间',
+  revoked_at      DATETIME      DEFAULT NULL COMMENT '撤销时间',
+  last_seen_at    DATETIME      DEFAULT NULL COMMENT '最近活跃时间',
+  last_ip         VARCHAR(45)   DEFAULT NULL COMMENT '最近访问 IP',
+  user_agent      VARCHAR(500)  DEFAULT NULL COMMENT '最近访问 User-Agent',
+  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_auth_sessions_jti (jti),
+  KEY idx_auth_sessions_user_id (user_id),
+  KEY idx_auth_sessions_status (status),
+  KEY idx_auth_sessions_expires_at (expires_at),
+  CONSTRAINT fk_auth_sessions_user
+    FOREIGN KEY (user_id) REFERENCES users (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='认证会话表';
+
+-- ============================================================================
+-- 6. 隐患图片表（立项书 §四(五) 隐患图片上传与处理模块 + §9.5）
 -- ============================================================================
 CREATE TABLE hazard_images (
   id              INT           NOT NULL AUTO_INCREMENT,
@@ -124,7 +150,7 @@ CREATE TABLE hazard_images (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 5. 会话表（会话持久化，替代内存 Map）
+-- 7. 会话表（业务会话持久化，替代内存 Map）
 -- ============================================================================
 CREATE TABLE sessions (
   id          VARCHAR(64)   NOT NULL COMMENT 'UUID',
@@ -142,7 +168,7 @@ CREATE TABLE sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 6. 排查报告表（原 results 表重命名，立项书 §四(七) 报告生成与下载模块）
+-- 8. 排查报告表（原 results 表重命名，立项书 §四(七) 报告生成与下载模块）
 -- ============================================================================
 CREATE TABLE inspection_reports (
   id              INT           NOT NULL AUTO_INCREMENT,
@@ -175,7 +201,7 @@ CREATE TABLE inspection_reports (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 7. 报告-图片关联表（支持多图分析结果与图片的多对多关系）
+-- 9. 报告-图片关联表（支持多图分析结果与图片的多对多关系）
 -- ============================================================================
 CREATE TABLE inspection_report_images (
   id          INT           NOT NULL AUTO_INCREMENT,

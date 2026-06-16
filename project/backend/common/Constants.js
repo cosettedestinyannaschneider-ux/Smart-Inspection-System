@@ -1,7 +1,5 @@
 /**
- * 全局常量定义（禁止在业务代码中硬编码）
- *
- * @created 2026-05-18
+ * 全局常量定义，避免在业务代码中散落硬编码。
  */
 const path = require('path')
 
@@ -34,6 +32,7 @@ module.exports = {
   PASSWORD_HASH_LENGTH: 64,
   MAX_LOGIN_ATTEMPTS: 5,
   LOCK_DURATION_MINUTES: 30,
+  JWT_ACCESS_EXPIRES_IN_DEFAULT: '8h',
 
   // ---- 日志 ----
   LOG_QUERY_LIMIT: 500,
@@ -42,7 +41,7 @@ module.exports = {
   ROLE_ADMIN: 'admin',
   ROLE_USER: 'user',
 
-  // ---- 账户状态 ----
+  // ---- 状态 ----
   STATUS_ACTIVE: 'active',
   STATUS_DISABLED: 'disabled',
   STATUS_LOCKED: 'locked',
@@ -53,6 +52,7 @@ module.exports = {
 
   // ---- 操作类型 ----
   ACTION_LOGIN: 'LOGIN',
+  ACTION_LOGOUT: 'LOGOUT',
   ACTION_AI_INSPECTION: 'AI_INSPECTION',
   ACTION_AI_HAZARD_ANALYZE_MULTI: 'AI_HAZARD_ANALYZE_MULTI',
   ACTION_UPDATE_INSPECTION_RESULT: 'UPDATE_INSPECTION_RESULT',
@@ -75,5 +75,5 @@ module.exports = {
   ACTION_ADMIN_UPDATE_ENTERPRISE_PROFILE: 'ADMIN_UPDATE_ENTERPRISE_PROFILE',
 
   // ---- 系统提示词 ----
-  SYSTEM_PROMPT: '你是一个安全生产社会服务智检系统的AI助手。你的任务是协助用户进行安全检查、分析图片或文档内容，并提供专业建议。',
+  SYSTEM_PROMPT: '你是一个安全生产社会化服务智检系统的 AI 助手。你的任务是协助用户进行安全检查、分析图片或文档内容，并提供专业建议。',
 }

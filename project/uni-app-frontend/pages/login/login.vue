@@ -33,7 +33,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { apiUrl, normalizeUser, unwrapResponse } from '../../common/api-config'
+import { apiUrl, normalizeUser, request, storeLoginSession, unwrapResponse } from '../../common/api-config'
 
 const username = ref('')
 const password = ref('')
@@ -41,8 +41,8 @@ const showPassword = ref(false)
 const loading = ref(false)
 
 /**
- * 用户登录
- * 登录成功后按角色跳转：管理员进入管理端，普通用户进入智检页
+ * 用户登录。
+ * 登录成功后保存用户信息与 Access Token，并按角色跳转。
  */
 const handleLogin = () => {
   if (!username.value || !password.value) {
@@ -51,38 +51,44 @@ const handleLogin = () => {
   }
 
   loading.value = true
-  uni.request({
+  request({
     url: apiUrl('/api/login'),
     method: 'POST',
     data: { username: username.value, password: password.value },
-    success: (res) => {
-      const result = unwrapResponse(res)
-      if (result.ok) {
-        const nextUser = normalizeUser(result.user || result.data?.user || result.data)
-        if (!nextUser?.id || !nextUser?.role) {
-          uni.showToast({ title: '登录信息异常，请重试', icon: 'none' })
-          return
-        }
-        uni.setStorageSync('user', nextUser)
-        uni.showToast({ title: '登录成功', icon: 'success' })
-        setTimeout(() => {
-          if (nextUser.role === 'admin') {
-            uni.reLaunch({ url: '/pages/workbench/workbench' })
-          } else {
-            uni.reLaunch({ url: '/pages/process/process' })
-          }
-        }, 1000)
-      } else {
-        uni.showToast({ title: result.msg || '登录失败', icon: 'none' })
-      }
-    },
-    fail: (err) => {
-      console.error('Login Fail:', err)
-      uni.showToast({ title: '网络错误，请检查服务器设置/合法域名', icon: 'none' })
-    },
-    complete: () => {
-      loading.value = false
+  }).then((res) => {
+    const result = unwrapResponse(res)
+    if (!result.ok) {
+      uni.showToast({ title: result.msg || '登录失败', icon: 'none' })
+      return
     }
+
+    const payload = result.raw || {}
+    const nextUser = normalizeUser(result.user || payload.user || payload.data?.user)
+    const accessToken = payload.access_token || payload.data?.access_token
+    const expiresAt = payload.expires_at || payload.data?.expires_at
+    if (!nextUser?.id || !nextUser?.role || !accessToken) {
+      uni.showToast({ title: '登录信息异常，请重试', icon: 'none' })
+      return
+    }
+
+    storeLoginSession({
+      user: nextUser,
+      accessToken,
+      expiresAt,
+    })
+    uni.showToast({ title: '登录成功', icon: 'success' })
+    setTimeout(() => {
+      if (nextUser.role === 'admin') {
+        uni.reLaunch({ url: '/pages/workbench/workbench' })
+      } else {
+        uni.reLaunch({ url: '/pages/process/process' })
+      }
+    }, 1000)
+  }).catch((err) => {
+    console.error('Login Fail:', err)
+    uni.showToast({ title: '网络错误，请检查服务器设置/合法域名', icon: 'none' })
+  }).finally(() => {
+    loading.value = false
   })
 }
 
