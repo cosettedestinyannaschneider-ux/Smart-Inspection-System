@@ -5,6 +5,7 @@
 本项目基于 `uni-app + Vue 3 + Vite` 构建前端，基于 `Node.js + Express + MySQL` 构建后端，并接入大模型完成隐患图片分析、报告生成、历史存档与基础管理后台能力。
 
 当前稳定分支：`merge-stable-report`
+当前 GitHub 主线：`main`
 
 相关文档：
 
@@ -15,6 +16,7 @@
 - [部署文档](./DEPLOY.md)
 - [Docker 本地部署说明](./DEPLOY_DOCKER.md)
 - [阶段开发计划](./PHASE_PLAN.md)
+- [方案 B 分阶段路线](./PHASE_B_ROADMAP.md)
 - [数据库结构](./database/schema.sql)
 
 ## 1. 当前版本能做什么
@@ -39,6 +41,22 @@
 5. 下载 Word / PDF 报告
 6. 进入历史记录查看留档
 
+## 1.1 当前仓库协作方式
+
+当前新仓库以 `main` 作为唯一受保护主线。
+
+后续所有改动请遵循：
+
+1. 从 `main` 拉出独立分支
+2. 每个分支只处理一个明确目标
+3. 通过 Pull Request 合并回 `main`
+4. 同步更新接口文档、设计文档、测试记录中受影响部分
+
+推荐先阅读：
+
+- [../NEW_REPO_WORKFLOW.md](../NEW_REPO_WORKFLOW.md)
+- [PHASE_B_ROADMAP.md](./PHASE_B_ROADMAP.md)
+
 ## 2. 项目结构
 
 ```text
@@ -49,6 +67,7 @@ project/
 ├── API_DOC.md
 ├── DESIGN_DOC.md
 ├── DEPLOY.md
+├── PHASE_B_ROADMAP.md
 ├── database/
 │   ├── schema.sql
 │   ├── demo_seed.sql
@@ -120,6 +139,13 @@ PORT=3000
 
 - [../.env.docker.example](../.env.docker.example)
 - [DEPLOY_DOCKER.md](./DEPLOY_DOCKER.md)
+
+建议直接复制模板文件再填写，而不是手动新建：
+
+```powershell
+Copy-Item project\backend\.env.example project\backend\.env
+Copy-Item .env.docker.example .env
+```
 
 ## 5. 数据库初始化
 
@@ -372,8 +398,7 @@ taskkill /PID 进程号 /F
 当前版本虽然已经适合演示和继续开发，但仍有一些限制：
 
 - 管理后台部分页面仍偏基础能力，未全部形成完整业务闭环
-- 还没有建立正式的 GitHub CI 流程
-- 自动化测试覆盖仍然不足
+- GitHub CI 已建立，但自动化测试覆盖仍不足
 - 生产部署文档还可以继续细化
 - 正式交付前，AI 返回的法规条文仍建议人工复核
 
@@ -381,11 +406,11 @@ taskkill /PID 进程号 /F
 
 如果团队后续继续迭代，建议采用下面的方式：
 
-1. 以当前稳定分支为基线继续开发
+1. 从 `main` 拉出独立分支继续开发
 2. 一个功能一个分支
 3. 一个功能一个 PR
 4. 每次合并前做最小冒烟测试
-5. 后续逐步补充 CI、PR 模板和 issue 模板
+5. 同步更新测试记录、接口文档和阶段路线
 
 ## 14. 参考文档
 
@@ -396,3 +421,4 @@ taskkill /PID 进程号 /F
 - [部署文档](./DEPLOY.md)
 - [Docker 本地部署说明](./DEPLOY_DOCKER.md)
 - [阶段开发计划](./PHASE_PLAN.md)
+- [方案 B 分阶段路线](./PHASE_B_ROADMAP.md)

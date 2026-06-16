@@ -4,10 +4,10 @@ services:
     container_name: safety-inspection-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Please set MYSQL_ROOT_PASSWORD in root .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_project}
       MYSQL_USER: ${MYSQL_USER:-app_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app_password}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Please set MYSQL_PASSWORD in root .env}
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -15,7 +15,7 @@ services:
       - ./project/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./project/database/demo_seed.sql:/docker-entrypoint-initdb.d/02-demo-seed.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root123456}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:?Please set MYSQL_ROOT_PASSWORD in root .env}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -34,7 +34,7 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${MYSQL_USER:-app_user}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-app_password}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?Please set MYSQL_PASSWORD in root .env}
       DB_NAME: ${MYSQL_DATABASE:-ai_project}
       PORT: 3000
     ports:
