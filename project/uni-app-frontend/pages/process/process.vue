@@ -311,7 +311,7 @@
           <view v-if="hazardImageList.length === 0" class="empty-tip">暂无图片，请先上传</view>
           <view v-else class="hazard-grid">
             <view v-for="img in hazardImageList" :key="img.id" class="hazard-item">
-              <image class="hazard-thumb" :src="assetUrl(img.file_path)" mode="aspectFill" @click="previewImage(assetUrl(img.file_path))" />
+              <image class="hazard-thumb" :src="fileUrl(img.file_path)" mode="aspectFill" @click="previewImage(fileUrl(img.file_path))" />
               <view
                 class="hazard-select"
                 :class="{ active: selectedHazardIds.includes(img.id) }"
@@ -348,7 +348,7 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { apiUrl, assetUrl, clearLoginSession, getStoredUser, request } from '../../common/api-config'
+import { apiUrl, clearLoginSession, downloadFile, fileUrl, getStoredUser, request, requestTask, uploadFile } from '../../common/api-config'
 
 const user = ref({})
 const prompt = ref('')
@@ -438,15 +438,14 @@ const saveEditResult = (msg) => {
     ? { items: msg.editData.items }
     : { hazard_description: msg.editData.hazard_description, basis: msg.editData.basis, suggestion: msg.editData.suggestion }
   const newContent = JSON.stringify(payload, null, 2)
-  uni.request({
+  request({
     url: apiUrl('/api/history/update-result'),
     method: 'POST',
     data: {
       id: msg.id,
-      user_id: user.value.id,
       result: newContent
     },
-    success: (res) => {
+  }).then((res) => {
       if (res.data.success) {
         msg.content = newContent
         msg.isEditing = false
@@ -457,10 +456,11 @@ const saveEditResult = (msg) => {
       } else {
         uni.showToast({ title: res.data.message || '保存失败', icon: 'none' })
       }
-    },
-    fail: () => uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' }),
-    complete: () => savingResult.value = false
-  })
+    }).catch(() => {
+      uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+    }).finally(() => {
+      savingResult.value = false
+    })
 }
 
 onMounted(() => {
@@ -492,13 +492,12 @@ const openHazardImageModal = () => {
  */
 const fetchHazardImages = () => {
   if (!user.value?.id) return
-  uni.request({
-    url: apiUrl(`/api/hazard/images/list/${user.value.id}`),
+  request({
+    url: apiUrl('/api/hazard/images/list'),
     method: 'GET',
-    success: (res) => {
-      if (res.data?.success) hazardImageList.value = res.data.data || []
-    }
-  })
+  }).then((res) => {
+    if (res.data?.success) hazardImageList.value = res.data.data || []
+  }).catch(() => {})
 }
 
 /**
@@ -531,11 +530,11 @@ const uploadHazardImages = async (filePaths) => {
   try {
     for (const fp of filePaths) {
       const ok = await new Promise((resolve) => {
-        const task = uni.uploadFile({
+        const task = uploadFile({
           url: apiUrl('/api/hazard/images/upload'),
           filePath: fp,
           name: 'files',
-          formData: { user_id: user.value.id, enterprise_id: currentEnterpriseId.value || '' },
+          formData: { enterprise_id: currentEnterpriseId.value || '' },
           success: (res) => {
             let data
             try {
@@ -602,11 +601,11 @@ const confirmDeleteHazardImage = () => {
   if (!img?.id || hazardDeleting.value) return
   hazardDeleting.value = true
 
-  uni.request({
+  request({
     url: apiUrl('/api/hazard/images/delete'),
     method: 'POST',
-    data: { user_id: user.value.id, id: img.id },
-    success: (res) => {
+    data: { id: img.id },
+  }).then((res) => {
       if (res.data?.success) {
         uni.showToast({ title: '已删除' })
         fetchHazardImages()
@@ -615,12 +614,11 @@ const confirmDeleteHazardImage = () => {
       } else {
         uni.showToast({ title: res.data?.message || '删除失败', icon: 'none' })
       }
-    },
-    fail: () => uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' }),
-    complete: () => {
+    }).catch(() => {
+      uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+    }).finally(() => {
       hazardDeleting.value = false
-    }
-  })
+    })
 }
 
 /**
@@ -637,10 +635,10 @@ const onRegionChange = (e) => {
  */
 // 获取可用模型列表
 const fetchModelList = () => {
-  uni.request({
+  request({
     url: apiUrl('/api/models/list'),
     method: 'GET',
-    success: (res) => {
+  }).then((res) => {
       const data = res.data?.data || res.data || []
       if (Array.isArray(data) && data.length) {
         modelList.value = [
@@ -650,11 +648,9 @@ const fetchModelList = () => {
       } else {
         modelList.value = [{ id: null, label: '默认模型' }]
       }
-    },
-    fail: () => {
+    }).catch(() => {
       modelList.value = [{ id: null, label: '默认模型' }]
-    },
-  })
+    })
 }
 
 // 模型切换
@@ -667,11 +663,10 @@ const onModelChange = (e) => {
 const currentEnterpriseId = ref(null)
 
 const fetchEnterpriseInfo = () => {
-  uni.request({
+  request({
     url: apiUrl('/api/enterprise/get'),
     method: 'POST',
-    data: { user_id: user.value.id },
-    success: (res) => {
+  }).then((res) => {
       if (res.data.success) {
         const d = res.data
         enterpriseForm.value = d.data && typeof d.data === 'object' && Object.keys(d.data).length
@@ -680,8 +675,7 @@ const fetchEnterpriseInfo = () => {
         /** 保存企业 ID 用于后续上传和分析时自动关联 */
         currentEnterpriseId.value = d.id || null
       }
-    }
-  })
+    }).catch(() => {})
 }
 
 /**
@@ -697,34 +691,31 @@ const saveEnterpriseInfo = () => {
   if (!enterpriseForm.value.phone) return uni.showToast({ title: '请输入联系电话', icon: 'none' })
 
   uni.showLoading({ title: '保存中...' })
-  uni.request({
+  request({
     url: apiUrl('/api/enterprise/update'),
     method: 'POST',
-    data: { user_id: user.value.id, ...enterpriseForm.value },
-    success: (res) => {
+    data: { ...enterpriseForm.value },
+  }).then((res) => {
       uni.hideLoading()
       if (res.data.success) {
         uni.showToast({ title: '已更新企业信息' })
         showEnterpriseModal.value = false // 保存成功后关闭弹窗
       }
-    },
-    fail: () => {
+    }).catch(() => {
       uni.hideLoading()
       uni.showToast({ title: '网络请求失败，请稍后重试', icon: 'none' })
-    }
-  })
+    })
 }
 
 // 获取会话列表
 const fetchSessions = () => {
-  uni.request({
-    url: apiUrl(`/api/sessions/${user.value.id}`),
-    success: (res) => {
+  request({
+    url: apiUrl('/api/sessions'),
+  }).then((res) => {
       if (res.data.success) {
         sessionList.value = res.data.data
       }
-    }
-  })
+    }).catch(() => {})
 }
 
 // 加载特定会话
@@ -733,26 +724,25 @@ const loadSession = (sessionId) => {
   const session = sessionList.value.find(s => s.session_id === sessionId)
   currentSessionTitle.value = session ? session.title : '对话详情'
   
-  uni.request({
+  request({
     url: apiUrl(`/api/session/${sessionId}`),
-    success: (res) => {
+  }).then((res) => {
       if (res.data.success) {
         messages.value = res.data.data.map(item => [
-          { role: 'user', content: item.prompt, image: item.image_path ? assetUrl(item.image_path) : null },
+          { role: 'user', content: item.prompt, image: item.image_path ? fileUrl(item.image_path) : null },
           { 
             id: item.id,
             role: 'assistant', 
             content: item.result, 
-            wordPath: item.word_path, 
-            pdfPath: item.pdf_path,
+            wordPath: item.wordPath || item.word_path, 
+            pdfPath: item.pdfPath || item.pdf_path,
             isEditing: false,
             editData: null
           }
         ]).flat()
         scrollToBottom()
       }
-    }
-  })
+    }).catch(() => {})
   if (uni.getSystemInfoSync().windowWidth < 768) showSidebar.value = false
 }
 
@@ -773,15 +763,14 @@ const deleteSession = (sessionId) => {
     content: '删除后无法找回对话内容',
     success: (res) => {
       if (res.confirm) {
-        uni.request({
+        request({
           url: apiUrl('/api/session/delete'),
           method: 'POST',
           data: { session_id: sessionId },
-          success: () => {
+        }).then(() => {
             fetchSessions()
             if (currentSessionId.value === sessionId) startNewChat()
-          }
-        })
+        }).catch(() => {})
       }
     }
   })
@@ -809,12 +798,11 @@ const handleSend = () => {
 
   if (currentImage) {
     // 单图即时分析：沿用 /api/process（上传图片）
-    const uploadTask = uni.uploadFile({
+    const uploadTask = uploadFile({
       url: apiUrl('/api/process'),
       filePath: currentImage,
       name: 'file',
       formData: {
-        user_id: user.value.id,
         prompt: currentPrompt,
         session_id: currentSessionId.value,
         model_id: selectedModelId.value || '',
@@ -832,11 +820,10 @@ const handleSend = () => {
 
   if (selectedIds.length) {
     // 多图隐患分析（9.5 + 9.6）：使用已上传的隐患照片进行一次性分析
-    const reqTask = uni.request({
+    const reqTask = requestTask({
       url: apiUrl('/api/hazard/analyze'),
       method: 'POST',
       data: {
-        user_id: user.value.id,
         prompt: currentPrompt,
         session_id: currentSessionId.value,
         image_ids: selectedIds,
@@ -855,11 +842,10 @@ const handleSend = () => {
   }
 
   // 纯文本对话：沿用 /api/process
-  const reqTask = uni.request({
+  const reqTask = requestTask({
     url: apiUrl('/api/process'),
     method: 'POST',
     data: {
-      user_id: user.value.id,
       prompt: currentPrompt,
       session_id: currentSessionId.value,
       model_id: selectedModelId.value || '',
@@ -963,12 +949,12 @@ const previewImage = (url) => {
 
 const handleDownload = (path) => {
   if (!path) return
-  const url = assetUrl(path)
+  const url = fileUrl(path)
   // #ifdef H5
   window.open(url)
   // #endif
   // #ifndef H5
-  uni.downloadFile({
+  downloadFile({
     url,
     success: (res) => {
       uni.openDocument({ filePath: res.tempFilePath })

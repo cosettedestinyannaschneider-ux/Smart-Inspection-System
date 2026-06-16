@@ -10,10 +10,19 @@ const getAccessSecret = () => process.env.JWT_ACCESS_SECRET || DEFAULT_JWT_ACCES
 /** 读取 Access Token 过期时间配置 */
 const getAccessExpiresIn = () => process.env.JWT_ACCESS_EXPIRES_IN || C.JWT_ACCESS_EXPIRES_IN_DEFAULT
 
+/** 读取文件访问票据过期时间配置 */
+const getFileAccessExpiresIn = () => process.env.JWT_FILE_EXPIRES_IN || C.JWT_FILE_EXPIRES_IN_DEFAULT
+
 /** 签发 Access Token */
 const signAccessToken = (payload) => jwt.sign(payload, getAccessSecret(), {
   algorithm: 'HS256',
   expiresIn: getAccessExpiresIn(),
+})
+
+/** 签发受限文件访问票据 */
+const signFileAccessToken = (payload) => jwt.sign(payload, getAccessSecret(), {
+  algorithm: 'HS256',
+  expiresIn: getFileAccessExpiresIn(),
 })
 
 /** 校验 Access Token */
@@ -21,8 +30,16 @@ const verifyAccessToken = (token) => jwt.verify(token, getAccessSecret(), {
   algorithms: ['HS256'],
 })
 
+/** 校验受限文件访问票据 */
+const verifyFileAccessToken = (token) => jwt.verify(token, getAccessSecret(), {
+  algorithms: ['HS256'],
+})
+
 module.exports = {
   signAccessToken,
   verifyAccessToken,
   getAccessExpiresIn,
+  signFileAccessToken,
+  verifyFileAccessToken,
+  getFileAccessExpiresIn,
 }

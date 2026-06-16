@@ -40,13 +40,15 @@ const historyDal = {
 
   async findSessionsByUserId(userId) {
     const [rows] = await db.execute(`
-      SELECT session_id,
-             COALESCE(NULLIF(MAX(prompt), ''), '新对话') as title,
-             MAX(created_at) as created_at
-      FROM inspection_reports
-      WHERE user_id = ? AND session_id IS NOT NULL
-      GROUP BY session_id
-      ORDER BY created_at DESC
+      SELECT
+        s.id AS session_id,
+        COALESCE(NULLIF(MAX(ir.prompt), ''), NULLIF(MAX(s.title), ''), '新对话') AS title,
+        MAX(ir.created_at) AS created_at
+      FROM sessions s
+      LEFT JOIN inspection_reports ir ON ir.session_id = s.id AND ir.user_id = s.user_id
+      WHERE s.user_id = ? AND s.status = 'active'
+      GROUP BY s.id
+      ORDER BY created_at DESC, s.updated_at DESC
     `, [userId])
     return rows
   },
@@ -55,6 +57,14 @@ const historyDal = {
     const [rows] = await db.execute(
       'SELECT * FROM inspection_reports WHERE session_id = ? ORDER BY created_at ASC',
       [sessionId]
+    )
+    return rows
+  },
+
+  async findBySessionIdForUser(sessionId, userId) {
+    const [rows] = await db.execute(
+      'SELECT * FROM inspection_reports WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC',
+      [sessionId, userId]
     )
     return rows
   },
@@ -77,6 +87,13 @@ const historyDal = {
     return await db.execute(
       'DELETE FROM inspection_reports WHERE session_id = ?',
       [sessionId]
+    )
+  },
+
+  async deleteBySessionIdForUser(sessionId, userId) {
+    return await db.execute(
+      'DELETE FROM inspection_reports WHERE session_id = ? AND user_id = ?',
+      [sessionId, userId]
     )
   },
 

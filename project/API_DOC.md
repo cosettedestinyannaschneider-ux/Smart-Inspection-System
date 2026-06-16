@@ -122,11 +122,12 @@
 - **成功**: `{ code: 0, msg: "注册成功" }`
 - **失败**: `{ code: 2003, msg: "用户名已存在" }`
 
-### 1.5 部门列表（公共）
+### 1.5 部门列表
 - **URL**: `GET /api/departments/list`
+- **请求头**: `Authorization: Bearer <access_token>`
 - **返回**: `{ code: 0, data: [{ id, name, created_at }] }`
 
-> 说明：除认证相关接口外，普通用户业务接口当前仍保留 `user_id` 传参兼容，后续 Phase 1 PR2 会统一切换为以后端鉴权上下文为准。
+> 说明：自 Phase 1 PR2 起，普通用户核心业务接口统一以后端鉴权上下文为准，不再信任客户端传入的 `user_id`。
 
 ---
 
@@ -134,12 +135,15 @@
 
 ### 2.1 获取企业信息
 - **URL**: `POST /api/enterprise/get`
-- **参数**: `user_id` (Number)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `enterprise:manage`
 - **返回**: `{ code: 0, data: { id, name, region, address, contact, phone, industry, enterprise_type, scale, inspector_name, inspection_date, ... } }`
 
 ### 2.2 更新企业信息
 - **URL**: `POST /api/enterprise/update`
-- **参数**: `user_id` (Number), `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `inspector_name`, `inspection_date`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `enterprise:manage`
+- **参数**: `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `inspector_name`, `inspection_date`, `project_name`
 
 ---
 
@@ -148,35 +152,44 @@
 ### 3.1 AI 智能巡检（单文件）
 - **URL**: `POST /api/process`
 - **方法**: `POST` (Multipart/form-data)
-- **参数**: `user_id` (Number), `prompt` (String), `session_id` (String, 可选), `file` (File, 可选)
-- **返回**: `{ code: 0, data: { result, wordPath, pdfPath, sessionId, id } }`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `analysis:run`
+- **参数**: `prompt` (String), `session_id` (String, 可选), `model_id` (Number, 可选), `file` (File, 可选)
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
 
 ### 3.2 多图智能隐患分析
 - **URL**: `POST /api/hazard/analyze`
 - **方法**: `POST` (JSON)
-- **参数**: `user_id` (Number), `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选)
-- **返回**: `{ code: 0, data: { result, wordPath, pdfPath, sessionId, id } }`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `analysis:run`
+- **参数**: `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选), `model_id` (Number, 可选)
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
 
 ### 3.3 编辑保存分析结果
 - **URL**: `POST /api/history/update-result`
-- **参数**: `id` (Number), `result` (String), `user_id` (Number)
-- **返回**: `{ code: 0, data: { wordPath, pdfPath } }`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `analysis:run`
+- **参数**: `id` (Number), `result` (String)
+- **返回**: `{ code: 0, wordPath, pdfPath }`
 
 ---
 
 ## 4. 会话管理
 
 ### 4.1 获取会话列表
-- **URL**: `GET /api/sessions/:user_id`
+- **URL**: `GET /api/sessions`
+- **请求头**: `Authorization: Bearer <access_token>`
 - **返回**: `{ code: 0, data: [{ session_id, title, created_at }] }`
 
 ### 4.2 获取会话详情
 - **URL**: `GET /api/session/:session_id`
-- **返回**: `{ code: 0, data: [{ id, prompt, result, word_path, pdf_path, ... }] }`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, ... }] }`
 
 ### 4.3 删除会话
 - **URL**: `POST /api/session/delete`
-- **参数**: `session_id` (Number)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **参数**: `session_id` (String)
 
 ---
 
@@ -185,18 +198,29 @@
 ### 5.1 上传隐患图片
 - **URL**: `POST /api/hazard/images/upload`
 - **方法**: `POST` (Multipart, 最多 9 张)
-- **参数**: `user_id` (Number), `files` (File[]), `enterprise_id` (Number, 可选)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `image:manage`
+- **参数**: `files` (File[]), `enterprise_id` (Number, 可选)
 
 ### 5.2 获取图片列表
-- **URL**: `GET /api/hazard/images/list/:user_id`
+- **URL**: `GET /api/hazard/images/list`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `image:manage`
+- **返回**: `{ code: 0, data: [{ id, file_path, original_name, ... }] }`
+
+> `file_path` 为后端返回的受控预览地址，前端应直接使用，不再拼接公开 `/uploads/...` 路径。
 
 ### 5.3 删除图片（软删除）
 - **URL**: `POST /api/hazard/images/delete`
-- **参数**: `user_id` (Number), `id` (Number)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `image:manage`
+- **参数**: `id` (Number)
 
 ### 5.4 更新图片标签
 - **URL**: `POST /api/hazard/images/label`
-- **参数**: `user_id` (Number), `id` (Number), `label` (String)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `image:manage`
+- **参数**: `id` (Number), `label` (String)
 
 ---
 
@@ -204,10 +228,29 @@
 
 ### 6.1 删除报告记录
 - **URL**: `POST /api/history/delete`
-- **参数**: `user_id` (Number), `id` (Number)
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `report:download`
+- **参数**: `id` (Number)
 
 ### 6.2 查看历史记录
-- **URL**: `GET /api/history/:user_id`
+- **URL**: `GET /api/history`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `report:download`
+- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, ... }] }`
+
+### 6.3 受控文件访问
+
+以下地址主要由后端返回给前端直接使用，支持两种访问方式：
+
+- 请求头携带 `Authorization: Bearer <access_token>`
+- 或使用后端返回的 `access_token` 查询参数短时票据
+
+接口列表：
+
+- `GET /api/files/hazard-images/:image_id`
+- `GET /api/files/reports/:report_id/image`
+- `GET /api/files/reports/:report_id/word`
+- `GET /api/files/reports/:report_id/pdf`
 
 ---
 
@@ -216,15 +259,11 @@
 ### 7.1 知识列表
 - **URL**: `GET /api/knowledge/list`
 - **URL**: `GET /api/knowledge/categories/list`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **权限**: `knowledge:view`
 - **返回**: `{ code: 0, data: [...] }`
 
-### 7.2 上传知识文件
-- **URL**: `POST /api/knowledge/upload`
-- **方法**: `POST` (Multipart)
-- **参数**: `title`, `description`, `category_id` (可选), `file`
-
-### 7.3 更新/删除知识
-- **URL**: `POST /api/knowledge/update` | `POST /api/knowledge/delete`
+> 普通用户侧不再提供知识库写接口；上传、更新、归档统一走管理员接口。
 
 ---
 
