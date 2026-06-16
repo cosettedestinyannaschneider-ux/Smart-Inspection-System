@@ -338,6 +338,7 @@ const schemaInit = {
         'enterprise_id INT DEFAULT NULL',
         'session_id VARCHAR(64) DEFAULT NULL',
         'title VARCHAR(300) DEFAULT NULL',
+        'image_path VARCHAR(500) DEFAULT NULL',
         "status VARCHAR(20) NOT NULL DEFAULT 'completed'",
         'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
       ]) {

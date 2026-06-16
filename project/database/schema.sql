@@ -180,6 +180,7 @@ CREATE TABLE inspection_reports (
   result          LONGTEXT      DEFAULT NULL COMMENT 'AI分析结果(JSON)',
   word_path       VARCHAR(500)  DEFAULT NULL COMMENT 'Word报告路径',
   pdf_path        VARCHAR(500)  DEFAULT NULL COMMENT 'PDF报告路径',
+  image_path      VARCHAR(500)  DEFAULT NULL COMMENT '兼容旧单图报告的图片路径',
   status          ENUM('draft','completed') NOT NULL DEFAULT 'draft',
   created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
