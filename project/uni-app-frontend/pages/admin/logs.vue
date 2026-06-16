@@ -25,7 +25,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import AdminShell from '../../components/admin/AdminShell.vue'
-import { createActionLogs } from '../../common/admin-mock-data'
+import { apiUrl, request, unwrapResponse } from '../../common/api-config'
 
 /** 当前管理员信息 */
 const user = ref({})
@@ -35,23 +35,68 @@ const list = ref([])
 const keyword = ref('')
 /** 当前模块筛选条件 */
 const activeModule = ref('全部模块')
-/** 日志模块筛选选项 */
-const moduleOptions = ['全部模块', '认证', '隐患图片', 'AI 分析', '系统管理']
+/** 日志模块筛选选项，基于真实日志动态生成 */
+const moduleOptions = computed(() => {
+  const modules = new Set(list.value.map((item) => String(item.module || '').trim()).filter(Boolean))
+  return ['全部模块', ...Array.from(modules)]
+})
+/** 统一的日志查询请求封装 */
+const postAdmin = (path, payload = {}) => new Promise((resolve, reject) => {
+  request({
+    url: apiUrl(path),
+    method: 'POST',
+    data: payload,
+  }).then((response) => {
+    const result = unwrapResponse(response)
+    if (!result.ok) {
+      reject(new Error(result.msg || '请求失败'))
+      return
+    }
+    resolve(Array.isArray(result.data) ? result.data : [])
+  }).catch(() => reject(new Error('无法连接后端服务')))
+})
+/** 展示接口错误提示 */
+const showRequestError = (error) => {
+  uni.showToast({ title: error?.message || '加载日志失败', icon: 'none' })
+}
 /** 今日操作日志数量 */
-const todayCount = computed(() => list.value.filter(item => item.created_at.startsWith('2026-06-09')).length)
+const todayCount = computed(() => {
+  const today = new Date()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  const dateKey = `${today.getFullYear()}-${month}-${day}`
+  return list.value.filter((item) => String(item.created_at || '').startsWith(dateKey)).length
+})
 /** 管理员操作日志数量 */
 const adminCount = computed(() => list.value.filter(item => item.role === '管理员').length)
 /** 根据关键词和模块筛选日志 */
 const filteredList = computed(() => {
   const text = keyword.value.trim().toLowerCase()
-  return list.value.filter(item => (activeModule.value === '全部模块' || item.module === activeModule.value) && (!text || [item.username, item.action, item.details].some(value => String(value || '').toLowerCase().includes(text))))
+  return list.value.filter((item) => {
+    const textMatched = !text || [item.username, item.action, item.details, item.module].some((value) => String(value || '').toLowerCase().includes(text))
+    const moduleMatched = activeModule.value === '全部模块' || item.module === activeModule.value
+    return textMatched && moduleMatched
+  })
 })
 /** 公共框架鉴权完成后加载日志 */
-const handleAdminReady = (admin) => { user.value = admin; fetchList() }
-/** 加载日志，后续对接 POST /api/admin/logs/list */
-const fetchList = () => { list.value = createActionLogs() }
+const handleAdminReady = (admin) => {
+  user.value = admin
+  fetchList()
+}
+/** 加载真实日志 */
+const fetchList = async () => {
+  try {
+    list.value = await postAdmin('/api/admin/logs/list')
+    if (!moduleOptions.value.includes(activeModule.value)) {
+      activeModule.value = '全部模块'
+    }
+  } catch (error) {
+    list.value = []
+    showRequestError(error)
+  }
+}
 /** 切换模块筛选 */
-const changeModule = (event) => { activeModule.value = moduleOptions[event.detail.value] || '全部模块' }
+const changeModule = (event) => { activeModule.value = moduleOptions.value[event.detail.value] || '全部模块' }
 /** 清空全部筛选条件 */
 const clearFilters = () => { keyword.value = ''; activeModule.value = '全部模块' }
 </script>

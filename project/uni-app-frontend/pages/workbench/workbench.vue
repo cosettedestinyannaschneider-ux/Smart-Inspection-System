@@ -12,12 +12,6 @@
         <view class="stat-info">
           <text class="stat-label">{{ item.label }}</text>
           <text class="stat-value desktop-stat-value">{{ stats[item.valueKey] }}</text>
-          <view class="stat-trend">
-            <text class="trend-prefix">较昨日</text>
-            <text :class="item.trend > 0 ? 'trend-up' : 'trend-down'">
-              {{ item.trend > 0 ? '↑' : '↓' }} {{ item.trendValue }}
-            </text>
-          </view>
         </view>
       </view>
     </view>
@@ -44,16 +38,44 @@
 <script setup>
 import { ref } from 'vue'
 import AdminShell from '../../components/admin/AdminShell.vue'
+import { apiUrl, request, unwrapResponse } from '../../common/api-config'
 
-/** 工作台统计数据，后续接入统计接口时替换加载方法 */
-const stats = ref({ enterpriseCount: 8, pendingCount: 3, reportCount: 12 })
+/** 工作台统计数据 */
+const stats = ref({
+  enterpriseCount: 0,
+  pendingImageCount: 0,
+  reportCount: 0,
+  todayReportCount: 0,
+})
 
 /** 统计卡片展示配置 */
 const statisticCards = [
-  { key: 'enterprise', label: '企业总数', valueKey: 'enterpriseCount', trend: 2, trendValue: 2, symbol: '▦', theme: 'blue' },
-  { key: 'pending', label: '待分析', valueKey: 'pendingCount', trend: -1, trendValue: 1, symbol: '◔', theme: 'purple' },
-  { key: 'report', label: '报告数', valueKey: 'reportCount', trend: 4, trendValue: 4, symbol: '▤', theme: 'cyan' }
+  { key: 'enterprise', label: '企业总数', valueKey: 'enterpriseCount', symbol: '▦', theme: 'blue' },
+  { key: 'pending-image', label: '待分析图片', valueKey: 'pendingImageCount', symbol: '◔', theme: 'purple' },
+  { key: 'report', label: '报告总数', valueKey: 'reportCount', symbol: '▤', theme: 'cyan' },
+  { key: 'today-report', label: '今日新增报告', valueKey: 'todayReportCount', symbol: '▣', theme: 'orange' },
 ]
+
+/** 统一的工作台请求封装 */
+const postAdmin = (path, payload = {}) => new Promise((resolve, reject) => {
+  request({
+    url: apiUrl(path),
+    method: 'POST',
+    data: payload,
+  }).then((response) => {
+    const result = unwrapResponse(response)
+    if (!result.ok) {
+      reject(new Error(result.msg || '请求失败'))
+      return
+    }
+    resolve(result.data || {})
+  }).catch(() => reject(new Error('无法连接后端服务')))
+})
+
+/** 展示请求错误 */
+const showRequestError = (error) => {
+  uni.showToast({ title: error?.message || '加载统计失败', icon: 'none' })
+}
 
 /** 系统管理入口配置 */
 const managementMenus = [
@@ -71,9 +93,25 @@ const handleAdminReady = () => {
   loadWorkbenchStats()
 }
 
-/** 加载工作台统计数据，当前使用前端模拟数据 */
-const loadWorkbenchStats = () => {
-  stats.value = { enterpriseCount: 8, pendingCount: 3, reportCount: 12 }
+/** 加载工作台真实统计数据 */
+const loadWorkbenchStats = async () => {
+  try {
+    const data = await postAdmin('/api/admin/workbench/stats')
+    stats.value = {
+      enterpriseCount: Number(data.enterprise_count || 0),
+      pendingImageCount: Number(data.pending_image_count || 0),
+      reportCount: Number(data.report_count || 0),
+      todayReportCount: Number(data.today_report_count || 0),
+    }
+  } catch (error) {
+    stats.value = {
+      enterpriseCount: 0,
+      pendingImageCount: 0,
+      reportCount: 0,
+      todayReportCount: 0,
+    }
+    showRequestError(error)
+  }
 }
 
 /** 跳转到指定管理员功能页面 */
@@ -83,9 +121,9 @@ const goTo = (page) => {
 </script>
 
 <style scoped>
-.stats-grid { display: flex; gap: 16px; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .stat-card {
-  flex: 1; min-width: 0; min-height: 154px; padding: 28px 24px; display: flex; align-items: center; gap: 22px;
+  min-width: 0; min-height: 154px; padding: 28px 24px; display: flex; align-items: center; gap: 22px;
   background: #fff; border: 1px solid #edf1f7; border-radius: 14px; box-shadow: 0 5px 18px rgba(31,67,115,.05); box-sizing: border-box;
 }
 .stat-main { display: flex; align-items: center; gap: 22px; }
@@ -95,10 +133,6 @@ const goTo = (page) => {
 .stat-info { display: flex; flex-direction: column; min-width: 0; }
 .stat-label { font-size: 16px; color: #25334f; font-weight: 600; }
 .stat-value { margin-top: 6px; font-size: 38px; line-height: 1; color: #101d39; font-weight: 700; }
-.stat-trend { margin-top: 13px; display: flex; gap: 8px; font-size: 14px; }
-.trend-prefix { color: #9aa6b7; }
-.trend-up { color: #11bb7c; font-weight: 600; }
-.trend-down { color: #ff4d55; font-weight: 600; }
 .management-panel { margin-top: 24px; padding: 18px 15px 25px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; box-shadow: 0 5px 18px rgba(31,67,115,.04); }
 .panel-title { display: block; margin: 0 0 15px 1px; font-size: 20px; color: #172541; font-weight: 700; }
 .management-list { display: flex; flex-direction: column; gap: 9px; }
@@ -116,7 +150,7 @@ const goTo = (page) => {
 .theme-cyan { background: linear-gradient(145deg, #48dacf, #18bdb7); box-shadow: 0 5rpx 14rpx rgba(30,193,184,.2); }
 
 @media screen and (max-width: 900px) {
-  .stats-grid { gap: 16rpx; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; }
   .stat-card { min-height: 260rpx; padding: 30rpx 8rpx 24rpx; flex-direction: column; gap: 14rpx; border-radius: 24rpx; }
   .stat-main { width: 100%; justify-content: center; gap: 22rpx; }
   .mobile-stat-value { display: block; }
@@ -126,8 +160,6 @@ const goTo = (page) => {
   .stat-info { width: 100%; align-items: center; }
   .stat-label { font-size: 27rpx; color: #7f8b9c; font-weight: 500; }
   .stat-value { margin-top: 0; font-size: 43rpx; }
-  .stat-trend { margin-top: 12rpx; font-size: 26rpx; }
-  .trend-prefix { display: none; }
   .management-panel { margin: 34rpx -24rpx 0; padding: 28rpx 26rpx 34rpx; border: none; border-radius: 24rpx 24rpx 0 0; }
   .panel-title { margin: 0 0 32rpx; font-size: 32rpx; }
   .management-list { gap: 18rpx; }

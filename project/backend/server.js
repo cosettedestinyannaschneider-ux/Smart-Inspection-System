@@ -11,6 +11,7 @@ const aiService = require('./bll/aiService')
 const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
 const modelConfigService = require('./bll/modelConfigService')
+const adminWorkbenchService = require('./bll/adminWorkbenchService')
 
 // ---- 数据访问层 ----
 const historyDal = require('./dal/historyDal')
@@ -240,7 +241,7 @@ app.post('/api/login', async (req, res) => {
       const code = codeMap[result.message] || ErrorCode.LOGIN_FAILED
       return res.fail(code, result.message)
     }
-    await logDal.logAction(result.user.id, C.ACTION_LOGIN, { username })
+    await logDal.logAction(result.user.id, C.ACTION_LOGIN, { username }, req.ip)
     const loginPayload = await authService.createLoginSession({
       userId: result.user.id,
       ipAddress: req.ip,
@@ -316,7 +317,7 @@ app.post('/api/hazard/images/upload', requireAuth, requirePermission('image:mana
       enterpriseId,
     }))
     const created = await hazardImageDal.createMany(userId, payload)
-    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_UPLOAD, { count: created.length })
+    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_UPLOAD, { count: created.length }, req.ip)
     res.success(created)
   } catch (err) {
     console.error('[Server] hazard image upload error:', err)
@@ -349,7 +350,7 @@ app.post('/api/hazard/images/delete', requireAuth, requirePermission('image:mana
     if (Number(record.user_id) !== userId) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限删除该图片')
     await hazardImageDal.softDeleteById(id)
     fs.unlink(path.join(C.UPLOAD_DIR, String(record.file_path || '')), () => {})
-    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_DELETE, { id })
+    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_DELETE, { id }, req.ip)
     res.success(null, '已删除')
   } catch (err) {
     console.error('[Server] hazard image delete error:', err)
@@ -364,7 +365,7 @@ app.post('/api/hazard/images/label', requireAuth, requirePermission('image:manag
   if (!id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
     await hazardImageDal.updateLabel(userId, id, label || null)
-    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_LABEL, { id, label: label || null })
+    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_LABEL, { id, label: label || null }, req.ip)
     res.success(null, '已更新')
   } catch (err) {
     console.error('[Server] hazard image label error:', err)
@@ -434,7 +435,7 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     })
 
     await inspectionReportImageDal.linkImages(historyId, imageIds)
-    await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, { count: images.length })
+    await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, { count: images.length }, req.ip)
 
     res.success({
       result,
@@ -472,7 +473,7 @@ app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.
       enterpriseId: enterprise ? enterprise.id : null,
       title: enterprise ? `${enterprise.name} - 隐患排查报告` : null,
     })
-    await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, hasImage: !!filePath })
+    await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, hasImage: !!filePath }, req.ip)
 
     res.success({
       result,
@@ -585,7 +586,7 @@ app.post('/api/history/update-result', requireAuth, requirePermission('analysis:
     }
 
     await historyDal.updateResult(id, result, wordPath, pdfPath)
-    await logDal.logAction(userId, C.ACTION_UPDATE_INSPECTION_RESULT, { id })
+    await logDal.logAction(userId, C.ACTION_UPDATE_INSPECTION_RESULT, { id }, req.ip)
     res.success(buildReportDownloadUrls(req, id, wordPath, pdfPath), '保存成功')
   } catch (err) {
     console.error('[Server] update result error:', err)
@@ -612,7 +613,7 @@ app.post('/api/history/delete', requireAuth, requirePermission('report:download'
     if (record.word_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.word_path), () => {})
     if (record.pdf_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.pdf_path), () => {})
 
-    await logDal.logAction(userId, C.ACTION_DELETE_REPORT, { id })
+    await logDal.logAction(userId, C.ACTION_DELETE_REPORT, { id }, req.ip)
     res.success(null, '已删除')
   } catch (err) {
     console.error('[Server] delete history error:', err)
@@ -764,7 +765,7 @@ app.post('/api/enterprise/update', requireAuth, requirePermission('enterprise:ma
       inspector_name, inspection_date,
       project_name,
     })
-    await logDal.logAction(userId, C.ACTION_UPDATE_ENTERPRISE, { name })
+    await logDal.logAction(userId, C.ACTION_UPDATE_ENTERPRISE, { name }, req.ip)
     res.success(null, '企业信息已更新')
   } catch (err) {
     res.fail(ErrorCode.INTERNAL_ERROR, err.message)
@@ -942,11 +943,27 @@ app.post('/api/admin/templates/delete', adminAuth, async (req, res) => {
 })
 
 // =========================================================================
+// 管理员：工作台统计
+// =========================================================================
+app.post('/api/admin/workbench/stats', adminAuth, async (req, res) => {
+  try {
+    res.success({ data: await adminWorkbenchService.getStats() })
+  } catch (err) {
+    console.error('[Server] admin workbench stats error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+// =========================================================================
 // 管理员：操作日志
 // =========================================================================
 app.post('/api/admin/logs/list', adminAuth, async (req, res) => {
-  try { res.success(await logDal.findAll()) }
-  catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+  try {
+    res.success({ data: await logDal.findAll() })
+  } catch (err) {
+    console.error('[Server] admin logs list error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
 })
 
 // =========================================================================

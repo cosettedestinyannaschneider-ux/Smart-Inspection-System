@@ -60,6 +60,21 @@ const hazardImageDal = {
     return rows
   },
 
+  /** 统计已上传但尚未被任何排查报告关联的待分析图片数量 */
+  async countPendingAnalysis() {
+    const [rows] = await db.execute(`
+      SELECT COUNT(*) AS total
+      FROM hazard_images hi
+      WHERE hi.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM inspection_report_images iri
+          WHERE iri.image_id = hi.id
+        )
+    `)
+    return Number(rows[0]?.total || 0)
+  },
+
   /** 硬删除（保持旧接口兼容） */
   async deleteById(id) {
     return db.execute('DELETE FROM hazard_images WHERE id = ?', [id])
