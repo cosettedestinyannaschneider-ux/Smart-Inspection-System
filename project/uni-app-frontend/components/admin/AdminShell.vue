@@ -50,7 +50,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { apiUrl, clearLoginSession, getStoredUser, request } from '../../common/api-config'
+import { apiUrl, clearLoginSession, getStoredUser, normalizeUser, request, unwrapResponse } from '../../common/api-config'
 
 /** 页面参数 */
 const props = defineProps({
@@ -93,10 +93,10 @@ onMounted(async () => {
       url: apiUrl('/api/auth/me'),
       method: 'GET',
     })
-    const result = response?.data || response
-    const authUser = result?.data?.user
-    if (!result?.success || !authUser || authUser.role !== 'admin') {
-      throw new Error(result?.msg || '当前管理员登录状态无效')
+    const result = unwrapResponse(response)
+    const authUser = normalizeUser(result.user || result.raw?.user || result.data?.user)
+    if (!result.ok || !authUser || authUser.role !== 'admin') {
+      throw new Error(result.msg || '当前管理员登录状态无效')
     }
     currentUser.value = authUser
     emit('ready', authUser)

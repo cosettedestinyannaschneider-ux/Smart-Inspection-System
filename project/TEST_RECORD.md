@@ -1,5 +1,34 @@
 # 功能测试记录
 
+## 登录与报告图片兼容修复回归（2026-06-16）
+
+### 变更范围
+
+- 修复管理员登录后 `/api/auth/me` 返回结构解析不兼容导致的闪退。
+- 为 `inspection_reports` 补充旧单图兼容字段 `image_path`。
+- 为已有数据库启动迁移补充 `inspection_reports.image_path` 自动补列。
+- 补充本地开发同步说明，避免 PR 后误用旧分支或重复重建本地私有配置。
+
+### 数据库与配置
+
+- DDL 变更：`inspection_reports.image_path VARCHAR(500) DEFAULT NULL`。
+- 新增配置：无。
+- 本地已有库可通过 `schemaInit` 自动补列；也可手动执行 `ALTER TABLE inspection_reports ADD COLUMN image_path VARCHAR(500) DEFAULT NULL COMMENT '兼容旧单图报告的图片路径' AFTER pdf_path;`。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 41 files` | 通过 |
+| 前端 H5 构建 | `npm --prefix project/uni-app-frontend run build:h5` 通过 | 通过 |
+| 管理员登录 | 用户本地复测通过，不再闪退回登录页 | 通过 |
+| 普通用户上传图片 | 用户本地复测通过，不再报 `Unknown column 'image_path'` | 通过 |
+
+### 风险说明
+
+- 本次修复不改变登录接口、不改变 Token 格式、不新增环境变量。
+- `image_path` 仅作为旧单图兼容字段；多图报告仍以 `inspection_report_images` 作为结构化关联表。
+
 ## 阶段 E 第一轮：操作日志与管理员工作台真实联调（2026-06-16）
 
 ### 变更范围

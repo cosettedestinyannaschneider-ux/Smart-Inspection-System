@@ -15,6 +15,7 @@
 - [设计文档](./DESIGN_DOC.md)
 - [部署文档](./DEPLOY.md)
 - [Docker 本地部署说明](./DEPLOY_DOCKER.md)
+- [本地开发同步说明](./LOCAL_DEV_SYNC.md)
 - [阶段开发计划](./PHASE_PLAN.md)
 - [方案 B 分阶段路线](./PHASE_B_ROADMAP.md)
 - [数据库结构](./database/schema.sql)
@@ -178,7 +179,7 @@ COLLATE utf8mb4_unicode_ci;
 命令行示例：
 
 ```powershell
-mysql -u root -p ai_project < project\database\schema.sql
+mysql --default-character-set=utf8mb4 -u root -p -e "source E:/University/Project/project1.0/project/database/schema.sql"
 ```
 
 ### 5.3 可选：导入最小演示数据
@@ -197,7 +198,7 @@ mysql -u root -p ai_project < project\database\schema.sql
 导入命令：
 
 ```powershell
-mysql -u root -p ai_project < project\database\demo_seed.sql
+mysql --default-character-set=utf8mb4 -u root -p ai_project -e "source E:/University/Project/project1.0/project/database/demo_seed.sql"
 ```
 
 演示账号：
