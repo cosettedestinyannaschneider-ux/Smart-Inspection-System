@@ -49,7 +49,7 @@ const app = express()
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Admin-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   credentials: true
 }))
@@ -57,7 +57,7 @@ app.use(cors({
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Admin-Id')
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
   if (req.headers['access-control-request-private-network']) {
     res.header('Access-Control-Allow-Private-Network', 'true')
   }
@@ -883,7 +883,7 @@ app.post('/api/admin/config/ai/add', adminAuth, async (req, res) => {
 app.post('/api/admin/config/ai/update', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    const { admin_id, id, ...params } = req.body
+    const { id, ...params } = req.body
     await aiModelConfigDal.updateById(id, params)
     res.success(null, '配置已更新')
   } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }

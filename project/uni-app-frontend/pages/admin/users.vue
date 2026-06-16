@@ -213,8 +213,8 @@ const userList = ref([])
 const keyword = ref('')
 /** 当前角色筛选条件 */
 const activeRole = ref('all')
-/** 调用阶段 B 管理员接口，并统一携带当前管理员 ID */
-const { postAdmin } = createAdminOrganizationApi(() => user.value.id)
+/** 调用阶段 B 管理员接口，统一通过 Bearer Token 识别管理员身份 */
+const { postAdmin } = createAdminOrganizationApi()
 
 /** 展示接口错误提示 */
 const showRequestError = (error) => {

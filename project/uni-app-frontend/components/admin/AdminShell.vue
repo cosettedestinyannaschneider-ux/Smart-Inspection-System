@@ -78,7 +78,7 @@ const menuItems = [
 ]
 
 /** 初始化时统一校验管理员身份 */
-onMounted(() => {
+onMounted(async () => {
   /** 本地存储中的当前登录用户 */
   const user = getStoredUser()
   if (!user || user.role !== 'admin' || !user.id) {
@@ -86,7 +86,27 @@ onMounted(() => {
     return
   }
   currentUser.value = user
-  emit('ready', user)
+
+  try {
+    /** 通过后端会话接口确认当前管理员登录态仍然有效 */
+    const response = await request({
+      url: apiUrl('/api/auth/me'),
+      method: 'GET',
+    })
+    const result = response?.data || response
+    const authUser = result?.data?.user
+    if (!result?.success || !authUser || authUser.role !== 'admin') {
+      throw new Error(result?.msg || '当前管理员登录状态无效')
+    }
+    currentUser.value = authUser
+    emit('ready', authUser)
+  } catch (error) {
+    clearLoginSession()
+    uni.showToast({ title: '管理员登录已失效，请重新登录', icon: 'none' })
+    setTimeout(() => {
+      uni.reLaunch({ url: '/pages/login/login' })
+    }, 400)
+  }
 })
 
 /** 跳转到管理员菜单页面 */
