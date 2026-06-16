@@ -1,13 +1,13 @@
 const db = require('./db')
 const C = require('../common/Constants')
 
-/** 角色文案映射 */
+/** 角色中文名称映射 */
 const ROLE_LABEL_MAP = {
   admin: '管理员',
   user: '检查员',
 }
 
-/** 状态文案映射 */
+/** 状态中文名称映射 */
 const STATUS_LABEL_MAP = {
   active: '正常',
   disabled: '禁用',
@@ -42,6 +42,10 @@ const ACTION_META_MAP = {
   [C.ACTION_ADMIN_DELETE_DEPARTMENT]: { module: '组织管理', label: '删除部门' },
   [C.ACTION_ADMIN_EXPORT_ENTERPRISES]: { module: '企业档案', label: '导出企业数据' },
   [C.ACTION_ADMIN_UPDATE_ENTERPRISE_PROFILE]: { module: '企业档案', label: '更新企业档案' },
+  [C.ACTION_ADMIN_ADD_REPORT_TEMPLATE]: { module: '报告模板', label: '新增报告模板' },
+  [C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE]: { module: '报告模板', label: '更新报告模板' },
+  [C.ACTION_ADMIN_DELETE_REPORT_TEMPLATE]: { module: '报告模板', label: '删除报告模板' },
+  [C.ACTION_ADMIN_SET_REPORT_TEMPLATE_DEFAULT]: { module: '报告模板', label: '切换默认模板' },
 }
 
 /** 常用详情字段的中文标签 */
@@ -62,12 +66,15 @@ const DETAIL_LABEL_MAP = {
   permissions: '权限',
   detached_disabled_user_ids: '解除关联用户',
   hasImage: '包含图片',
+  is_default: '默认模板',
+  replaced_file: '替换文件',
 }
 
 /** 解析数据库中的 JSON 详情 */
 const parseDetails = (rawDetails) => {
   if (rawDetails === null || rawDetails === undefined || rawDetails === '') return null
   if (typeof rawDetails === 'object') return rawDetails
+
   try {
     return JSON.parse(rawDetails)
   } catch (error) {
@@ -87,7 +94,7 @@ const getActionMeta = (actionCode) => {
   return { module: '业务操作', label: actionCode || '未知操作' }
 }
 
-/** 统一格式化详情值 */
+/** 统一格式化详情字段值 */
 const formatDetailValue = (key, value) => {
   if (value === null || value === undefined || value === '') return '-'
   if (Array.isArray(value)) return value.map((item) => formatDetailValue('', item)).join('、')
@@ -105,6 +112,7 @@ const formatDetailValue = (key, value) => {
 const formatObjectDetails = (details) => {
   const entries = Object.entries(details || {}).filter(([, value]) => value !== undefined)
   if (!entries.length) return '暂无操作详情'
+
   return entries.map(([key, value]) => {
     const label = DETAIL_LABEL_MAP[key] || key
     return `${label}：${formatDetailValue(key, value)}`
@@ -142,12 +150,20 @@ const formatDetails = (actionCode, rawDetails) => {
       return `导出企业数据 ${formatDetailValue('count', details.count)} 条，文件：${formatDetailValue('file', details.file)}`
     case C.ACTION_ADMIN_UPDATE_ENTERPRISE_PROFILE:
       return `更新企业档案，企业 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_ADD_REPORT_TEMPLATE:
+      return `新增报告模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}，默认模板：${formatDetailValue('is_default', details.is_default)}`
+    case C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE:
+      return `更新报告模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}，替换文件：${formatDetailValue('replaced_file', details.replaced_file)}`
+    case C.ACTION_ADMIN_DELETE_REPORT_TEMPLATE:
+      return `删除报告模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_SET_REPORT_TEMPLATE_DEFAULT:
+      return `设为默认模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
     default:
       return formatObjectDetails(details)
   }
 }
 
-/** 将数据库记录映射为页面可直接展示的日志对象 */
+/** 将数据库日志记录映射为页面展示结构 */
 const mapLogRow = (row) => {
   const actionMeta = getActionMeta(row.action)
   const details = parseDetails(row.details)
@@ -204,7 +220,7 @@ const logDal = {
     return await queryLogs()
   },
 
-  /** 按用户查询日志，仍保持与管理员列表一致的展示结构 */
+  /** 按用户查询日志，保持与管理员列表一致的展示结构 */
   async findByUserId(userId) {
     return await queryLogs('WHERE l.user_id = ?', [userId])
   },

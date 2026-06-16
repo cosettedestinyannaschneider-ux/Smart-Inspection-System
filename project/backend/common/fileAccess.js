@@ -37,11 +37,15 @@ const resolveUploadAbsolutePath = (uploadDir, storedPath) => {
  * 判断某个上传文件是否仍允许通过公开静态目录直接访问。
  * 隐患图片和报告文件必须改走受控接口。
  */
-const isPublicStaticUploadPath = (requestPath, hazardUploadSubdir) => {
+const isPublicStaticUploadPath = (requestPath, hazardUploadSubdir, blockedSubdirs = []) => {
   const normalized = normalizeStoredUploadPath(requestPath).replace(/^\/+/, '')
   if (!normalized) return false
 
-  if (normalized === hazardUploadSubdir || normalized.startsWith(`${hazardUploadSubdir}/`)) {
+  const deniedSubdirs = [hazardUploadSubdir, ...blockedSubdirs]
+    .map((item) => normalizeStoredUploadPath(item).replace(/^\/+/, ''))
+    .filter(Boolean)
+
+  if (deniedSubdirs.some((subdir) => normalized === subdir || normalized.startsWith(`${subdir}/`))) {
     return false
   }
 

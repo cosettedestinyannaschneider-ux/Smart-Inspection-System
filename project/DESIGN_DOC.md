@@ -60,7 +60,7 @@
 ### 3.3 数据层（MySQL + 本地文件）
 
 - **MySQL**：`ai_project` 库，15 张业务表（enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/action_logs/ai_model_configs/report_templates/backup_records），后续待新增 `knowledge_clauses` 等结构化知识表。
-- **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`；隐患图片和报告文件通过受控文件接口访问，不再依赖公开静态路径直链。
+- **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`、`uploads/report-templates/`；隐患图片、报告文件和报告模板均通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
 
@@ -302,10 +302,10 @@ pages/
 - **企业信息维护**：管理员可编辑企业基本信息、排查状态和档案状态，保存后列表立即使用最新数据并显示最新保存时间。
 - **企业专属档案**：隐患图片、AI 分析结果和生成报告统一通过 `enterprise_id` 自动关联，形成企业专属隐患排查档案。
 - **操作日志**：支持日志统计、关键词搜索、模块筛选、日志详情和 IP 地址展示。
-- **报告模板**：支持模板概览、上传与编辑 DOCX 文件、设置默认模板、删除非默认模板。
+- **报告模板**：支持模板概览、上传与编辑 DOCX 文件、设置默认模板、删除非默认模板，并将默认模板真实接入报告生成链路；模板文件改为受控下载，不再公开暴露上传路径。
 - **数据备份**：支持手动备份、自动备份周期配置、备份安全说明和备份记录展示；暂不提供高风险数据库恢复操作。
 - **微信端适配**：业务按钮、列表和弹窗均在业务页面直接渲染，避免多层组件插槽导致微信端点击或内容渲染失效。
-- **数据状态**：第三阶段暂时使用 `common/admin-mock-data.js` 中的统一模拟数据，后端和数据库未修改。
+- **数据状态**：第三阶段中企业数据查询、操作日志、管理员工作台和报告模板已接入真实后端；知识库与数据备份仍待后续 PR 继续落地。
 
 ## 14. 后端阶段 A：数据库迁移与组织关系
 

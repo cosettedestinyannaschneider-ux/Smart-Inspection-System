@@ -508,10 +508,77 @@ Authorization: Bearer <access_token>
 | 方法 | URL | 说明 |
 |------|-----|------|
 | POST | `/api/admin/templates/list` | 模板列表 |
-| POST | `/api/admin/templates/add` | 新增模板 |
-| POST | `/api/admin/templates/update` | 更新模板 |
-| POST | `/api/admin/templates/set-default` | 设为默认模板 |
-| POST | `/api/admin/templates/delete` | 删除模板 |
+| POST | `/api/admin/templates/create` | 上传新模板（Multipart） |
+| POST | `/api/admin/templates/save` | 更新模板名称、说明或替换文件 |
+| POST | `/api/admin/templates/activate` | 设为默认模板 |
+| POST | `/api/admin/templates/remove` | 删除模板 |
+| GET | `/api/admin/templates/:template_id/file` | 下载模板文件 |
+
+- 所有接口均要求管理员登录态：`Authorization: Bearer <access_token>`。
+- 模板文件字段统一为 `file`，仅允许上传 `.docx`。
+- 首个成功上传的模板会自动成为默认模板。
+- 默认模板不可删除；若当前默认模板文件缺失，报告生成会自动回退到内置模板。
+
+`POST /api/admin/templates/list` 返回示例：
+
+```json
+{
+  "code": 0,
+  "success": true,
+  "data": [
+    {
+      "id": 3,
+      "name": "标准排查模板",
+      "description": "适用于常规企业隐患排查",
+      "file_path": "report-templates/1718527000000-123456789.docx",
+      "file_name": "1718527000000-123456789.docx",
+      "is_default": true,
+      "has_file": true,
+      "created_at": "2026-06-16T09:20:00.000Z",
+      "updated_at": "2026-06-16T09:20:00.000Z",
+      "download_url": "/api/admin/templates/3/file?access_token=..."
+    }
+  ]
+}
+```
+
+`POST /api/admin/templates/create`：
+
+- 请求方式：`Multipart/form-data`
+- 表单字段：
+  - `name`：模板名称
+  - `description`：模板说明，可空
+  - `file`：DOCX 模板文件，必填
+
+`POST /api/admin/templates/save`：
+
+- 仅修改名称和说明时可使用 JSON：
+
+```json
+{
+  "id": 3,
+  "name": "标准排查模板 V2",
+  "description": "更新了封面和签字栏"
+}
+```
+
+- 替换模板文件时使用 `Multipart/form-data`，并额外携带：
+  - `id`
+  - `name`
+  - `description`
+  - `file`
+
+`POST /api/admin/templates/activate`：
+
+```json
+{ "id": 3 }
+```
+
+`POST /api/admin/templates/remove`：
+
+```json
+{ "id": 4 }
+```
 
 ### 8.6 管理员工作台统计
 - **URL**: `POST /api/admin/workbench/stats`
@@ -549,7 +616,7 @@ Authorization: Bearer <access_token>
 
 ### 8.9 第三阶段前端对接约定
 
-> 当前状态：企业数据查询、操作日志和管理员工作台已完成真实接口联调；报告模板和数据备份页面仍处于 UI 与模拟交互阶段。
+> 当前状态：企业数据查询、操作日志、管理员工作台和报告模板已完成真实接口联调；数据备份页面仍处于后续规划阶段。
 
 #### 企业综合查询目标接口
 
@@ -649,6 +716,8 @@ Authorization: Bearer <access_token>
 - 模板新增和替换文件应使用 Multipart 上传。
 - 文件字段名建议统一为 `file`，仅允许 DOCX。
 - 编辑但不更换文件时，可继续使用 JSON 更新模板名称和说明。
+- 模板文件不再通过公开 `/uploads/...` 直链暴露，前端应使用后端返回的 `download_url`。
+- 模板管理页真实接口已切换为 `/create`、`/save`、`/activate`、`/remove`。
 
 #### 数据备份目标接口
 
