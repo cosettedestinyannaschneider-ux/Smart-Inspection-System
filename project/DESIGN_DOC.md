@@ -51,7 +51,7 @@
 ### 3.2 后端应用层（Node.js / Express）
 
 - **认证机制**：登录态采用 `Access JWT + auth_sessions`，兼顾 H5 / 小程序统一接入、服务端撤销、禁用账号即时失效与审计留痕。
-- **RBAC 权限控制**：管理员接口强制鉴权；普通用户数据隔离的目标以服务端认证上下文为准，当前旧接口仍处于从 `user_id` 传参向 Bearer Token 过渡阶段。
+- **RBAC 权限控制**：管理员接口强制鉴权；普通用户核心接口已切换为以服务端认证上下文为准，不再信任客户端传入的 `user_id`。
 - **AI 调度**：openai SDK 统一对接多模型（DeepSeek/豆包/阿里千问），前端可选择模型。
 - **知识库检索**：MySQL LIKE / 全文索引关键词匹配，不使用向量检索。
 - **报告生成引擎**：docx + docx-templater 模板化生成 Word，pdfkit 生成 PDF。
@@ -60,7 +60,7 @@
 ### 3.3 数据层（MySQL + 本地文件）
 
 - **MySQL**：`ai_project` 库，15 张业务表（enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/action_logs/ai_model_configs/report_templates/backup_records），后续待新增 `knowledge_clauses` 等结构化知识表。
-- **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`。
+- **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`；隐患图片和报告文件通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
 
@@ -69,7 +69,7 @@
 - 只有 **一个企业**，自动关联
 - 核心流程：上传隐患图片 → 勾选 → AI 分析 → 查看结果 → 生成报告
 - 侧边栏：企业信息 / 隐患图片库 / 历史对话 / 知识库查阅 / 我的操作记录
-- 数据隔离：目标状态为仅查看“当前登录用户自身数据”，后端逐步从 `user_id` 传参迁移到 `req.auth.userId`
+- 数据隔离：当前普通用户核心链路已统一为仅查看“当前登录用户自身数据”，后端以后端鉴权得到的 `req.auth.userId` 作为唯一可信身份来源
 - 权限由管理员分配（企业信息管理/图片管理/AI分析/报告下载/知识库查看）
 
 ### 管理员
@@ -125,7 +125,7 @@ pages/
 ### 数据隔离
 
 - 管理员：查询全部数据
-- 普通用户：仅查询当前登录用户自身的数据（企业、图片、分析、报告）；当前部分旧接口仍保留兼容参数，后续统一以后端鉴权结果为准
+- 普通用户：仅查询当前登录用户自身的数据（企业、图片、分析、报告）；核心链路已统一以后端鉴权结果为准
 
 ### 企业、部门与用户组织关系
 
@@ -152,6 +152,20 @@ pages/
 6. 前端展示阶段状态：正在识图 → 正在检索 → 正在生成分析 → 完成
 7. 用户可编辑/保存分析结果
 8. 点击生成报告 → Word + PDF 下载
+```
+
+### 7.3 受控文件访问
+
+```
+1. 后端生成报告或返回隐患图片列表时，不再直接暴露公开 uploads 路径
+2. 服务端为当前登录用户签发短时文件访问票据
+3. 前端使用受控 URL 进行 H5 预览、窗口下载或小程序下载
+4. 文件接口再次校验：
+   a. 票据资源类型和资源 ID 是否匹配
+   b. 登录会话是否仍有效
+   c. 当前用户是否拥有对应权限
+   d. 当前文件是否属于该用户（管理员除外）
+5. 校验通过后再返回本地文件流
 ```
 
 ### 7.2 知识库入库（管理员）

@@ -51,6 +51,9 @@ export const assetUrl = (path) => {
   // #endif
 }
 
+/** 构建受控文件下载/预览地址 */
+export const fileUrl = (path) => assetUrl(path)
+
 /** 归一化后端返回的用户对象 */
 export const normalizeUser = (rawUser) => {
   if (!rawUser || typeof rawUser !== 'object') return null
@@ -123,27 +126,53 @@ export const handleAuthFailure = (message = '登录状态已失效，请重新�
   }, 400)
 }
 
-/** 统一封装 uni.request */
-export const request = (options = {}) => new Promise((resolve, reject) => {
-  uni.request({
+/** 统一判断响应中是否包含认证失败 */
+const handleResponseAuthFailure = (response) => {
+  const result = unwrapResponse(response)
+  if (result.code === 1001 || result.code === 3004 || result.code === 3005) {
+    handleAuthFailure(result.msg || '登录状态已失效，请重新登录')
+  }
+}
+
+/** 保留 RequestTask 能力的请求封装，兼容手动中止场景 */
+export const requestTask = (options = {}) => {
+  const originalSuccess = options.success
+  return uni.request({
     ...options,
     header: withAuthHeader(options.header || {}),
     success: (response) => {
-      const result = unwrapResponse(response)
-      if (result.code === 1001 || result.code === 3004 || result.code === 3005) {
-        handleAuthFailure(result.msg || '登录状态已失效，请重新登录')
-      }
-      resolve(response)
+      handleResponseAuthFailure(response)
+      originalSuccess?.(response)
     },
+  })
+}
+
+/** 统一封装 uni.request */
+export const request = (options = {}) => new Promise((resolve, reject) => {
+  requestTask({
+    ...options,
+    success: (response) => resolve(response),
     fail: reject,
   })
 })
 
 /** 统一封装 uni.uploadFile */
 export const uploadFile = (options = {}) => {
+  const originalSuccess = options.success
   return uni.uploadFile({
     ...options,
     header: withAuthHeader(options.header || {}),
+    success: (response) => {
+      try {
+        const payload = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data
+        if (payload && typeof payload === 'object') {
+          handleResponseAuthFailure({ data: payload })
+        }
+      } catch (error) {
+        // 上传响应不是 JSON 时忽略认证解析，保持原有文件上传行为
+      }
+      originalSuccess?.(response)
+    },
   })
 }
 

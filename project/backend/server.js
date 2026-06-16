@@ -29,6 +29,11 @@ const knowledgeCategoryDal = require('./dal/knowledgeCategoryDal')
 const { responseMiddleware } = require('./common/Result')
 const { ErrorCode, ErrorMessage } = require('./common/ErrorCode')
 const C = require('./common/Constants')
+const {
+  resolveUploadAbsolutePath,
+  isPublicStaticUploadPath,
+  buildFileUrl,
+} = require('./common/fileAccess')
 const adminAuth = require('./middleware/adminAuth')
 const requireAuth = require('./middleware/requireAuth')
 const requirePermission = require('./middleware/requirePermission')
@@ -72,6 +77,10 @@ app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS')
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.sendStatus(200)
+  const requestPath = String(req.path || '').replace(/^\/+/, '')
+  if (!isPublicStaticUploadPath(requestPath, C.HAZARD_UPLOAD_SUBDIR)) {
+    return res.status(404).end()
+  }
   next()
 }, express.static(C.UPLOAD_DIR))
 
@@ -97,6 +106,85 @@ const hazardUpload = multer({
 
 // 初始化数据库
 schemaInit.init().catch(err => console.error('[Server] Schema init failed:', err))
+
+/** 统一读取当前登录用户 ID */
+const getAuthUserId = (req) => Number(req.auth?.userId || 0)
+
+/** 统一生成报告下载链接 */
+const buildReportDownloadUrls = (req, reportId, wordPath, pdfPath) => ({
+  wordPath: wordPath
+    ? buildFileUrl(`/api/files/reports/${reportId}/word`, authService.createFileAccessToken({
+        userId: getAuthUserId(req),
+        jti: req.auth.jti,
+        resourceType: 'report',
+        resourceId: reportId,
+        format: 'word',
+      }))
+    : null,
+  pdfPath: pdfPath
+    ? buildFileUrl(`/api/files/reports/${reportId}/pdf`, authService.createFileAccessToken({
+        userId: getAuthUserId(req),
+        jti: req.auth.jti,
+        resourceType: 'report',
+        resourceId: reportId,
+        format: 'pdf',
+      }))
+    : null,
+})
+
+/** 统一生成隐患图片受控访问链接 */
+const buildHazardImagePreviewUrl = (req, imageId) => buildFileUrl(
+  `/api/files/hazard-images/${imageId}`,
+  authService.createFileAccessToken({
+    userId: getAuthUserId(req),
+    jti: req.auth.jti,
+    resourceType: 'hazard-image',
+    resourceId: imageId,
+  })
+)
+
+/** 统一生成按报告回放的受控图片预览链接 */
+const buildReportImagePreviewUrl = (req, reportId) => buildFileUrl(
+  `/api/files/reports/${reportId}/image`,
+  authService.createFileAccessToken({
+    userId: getAuthUserId(req),
+    jti: req.auth.jti,
+    resourceType: 'report-image',
+    resourceId: reportId,
+  })
+)
+
+/** 尝试读取 Bearer Token 或文件访问票据 */
+const resolveFileRequestAuth = async (req, expected) => {
+  const bearer = String(req.headers.authorization || '').trim()
+  if (bearer.startsWith('Bearer ')) {
+    return await authService.authenticateAccessToken(bearer.slice('Bearer '.length).trim(), {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] || null,
+    })
+  }
+
+  const fileToken = String(req.query.access_token || '').trim()
+  if (!fileToken) {
+    throw new Error('请先登录')
+  }
+  return await authService.authenticateFileAccessToken(fileToken, expected)
+}
+
+/** 将数据库记录中的文件路径转为当前接口应暴露的受控地址 */
+const mapHistoryRecordForClient = (req, record) => ({
+  ...record,
+  image_path: record.image_path ? buildReportImagePreviewUrl(req, record.id) : null,
+  ...buildReportDownloadUrls(req, record.id, record.word_path, record.pdf_path),
+})
+
+/** 安全发送本地上传文件 */
+const sendControlledUploadFile = (res, absolutePath) => {
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    return res.fail(ErrorCode.NOT_FOUND, '文件不存在或已被移除')
+  }
+  return res.sendFile(absolutePath)
+}
 
 // 阶段 B 管理路由按领域拆分，保持原接口路径不变
 app.use('/api/admin/users', adminUserRoutes)
@@ -202,7 +290,7 @@ app.post('/api/register', async (req, res) => {
 // =========================================================================
 // 部门（公共读取）
 // =========================================================================
-app.get('/api/departments/list', async (req, res) => {
+app.get('/api/departments/list', requireAuth, async (req, res) => {
   try {
     const list = await departmentDal.findAll()
     res.success(list)
@@ -214,15 +302,11 @@ app.get('/api/departments/list', async (req, res) => {
 // =========================================================================
 // 隐患排查图片（9.5 模块）
 // =========================================================================
-app.post('/api/hazard/images/upload', hazardUpload.array('files', C.MAX_UPLOAD_FILES), async (req, res) => {
-  const userId = Number(req.body.user_id)
-  if (!userId) return res.fail(ErrorCode.PARAM_MISSING, '缺少 user_id')
-
+app.post('/api/hazard/images/upload', requireAuth, requirePermission('image:manage'), hazardUpload.array('files', C.MAX_UPLOAD_FILES), async (req, res) => {
+  const userId = getAuthUserId(req)
   const files = Array.isArray(req.files) ? req.files : []
   if (!files.length) return res.fail(ErrorCode.FILE_REQUIRED, '请上传图片文件')
-
   const enterpriseId = req.body.enterprise_id ? Number(req.body.enterprise_id) : null
-
   try {
     const payload = files.map((f) => ({
       filePath: path.posix.join(C.HAZARD_UPLOAD_SUBDIR, path.basename(f.path)),
@@ -239,14 +323,13 @@ app.post('/api/hazard/images/upload', hazardUpload.array('files', C.MAX_UPLOAD_F
   }
 })
 
-app.get('/api/hazard/images/list/:user_id', async (req, res) => {
-  const userId = Number(req.params.user_id)
-  if (!userId) return res.fail(ErrorCode.PARAM_MISSING, '缺少 user_id')
+app.get('/api/hazard/images/list', requireAuth, requirePermission('image:manage'), async (req, res) => {
+  const userId = getAuthUserId(req)
   try {
     const list = await hazardImageDal.listByUserId(userId)
     const result = list.map((img) => ({
       ...img,
-      file_path: 'uploads/' + img.file_path,
+      file_path: buildHazardImagePreviewUrl(req, img.id),
     }))
     res.success(result)
   } catch (err) {
@@ -255,10 +338,10 @@ app.get('/api/hazard/images/list/:user_id', async (req, res) => {
   }
 })
 
-app.post('/api/hazard/images/delete', async (req, res) => {
-  const userId = Number(req.body.user_id)
+app.post('/api/hazard/images/delete', requireAuth, requirePermission('image:manage'), async (req, res) => {
+  const userId = getAuthUserId(req)
   const id = Number(req.body.id)
-  if (!userId || !id) return res.fail(ErrorCode.PARAM_MISSING)
+  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
     const record = await hazardImageDal.findById(id)
     if (!record) return res.fail(ErrorCode.IMAGE_NOT_FOUND)
@@ -273,11 +356,11 @@ app.post('/api/hazard/images/delete', async (req, res) => {
   }
 })
 
-app.post('/api/hazard/images/label', async (req, res) => {
-  const userId = Number(req.body.user_id)
+app.post('/api/hazard/images/label', requireAuth, requirePermission('image:manage'), async (req, res) => {
+  const userId = getAuthUserId(req)
   const id = Number(req.body.id)
   const label = String(req.body.label || '').trim()
-  if (!userId || !id) return res.fail(ErrorCode.PARAM_MISSING)
+  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
     await hazardImageDal.updateLabel(userId, id, label || null)
     await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_LABEL, { id, label: label || null })
@@ -291,8 +374,8 @@ app.post('/api/hazard/images/label', async (req, res) => {
 // =========================================================================
 // 9.6 智能隐患分析（多图）
 // =========================================================================
-app.post('/api/hazard/analyze', async (req, res) => {
-  const userId = Number(req.body.user_id)
+app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), async (req, res) => {
+  const userId = getAuthUserId(req)
   const prompt = String(req.body.prompt || '')
   const sessionId = req.body.session_id
   const imageIds = Array.isArray(req.body.image_ids)
@@ -301,7 +384,6 @@ app.post('/api/hazard/analyze', async (req, res) => {
   const enterpriseId = req.body.enterprise_id ? Number(req.body.enterprise_id) : null
   const modelId = req.body.model_id ? Number(req.body.model_id) : null
 
-  if (!userId) return res.fail(ErrorCode.PARAM_MISSING, '缺少 user_id')
   if (!imageIds.length) return res.fail(ErrorCode.PARAM_MISSING, '请至少选择 1 张隐患照片')
 
   try {
@@ -353,7 +435,12 @@ app.post('/api/hazard/analyze', async (req, res) => {
     await inspectionReportImageDal.linkImages(historyId, imageIds)
     await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, { count: images.length })
 
-    res.success({ result, wordPath, pdfPath, sessionId: newSessionId, id: historyId })
+    res.success({
+      result,
+      sessionId: newSessionId,
+      id: historyId,
+      ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
+    })
   } catch (err) {
     console.error('[Server] hazard analyze error:', err)
     const code = err.message?.includes('AI') ? ErrorCode.AI_SERVICE_ERROR : ErrorCode.INTERNAL_ERROR
@@ -364,12 +451,11 @@ app.post('/api/hazard/analyze', async (req, res) => {
 // =========================================================================
 // AI 巡检（旧接口，保持兼容）
 // =========================================================================
-app.post('/api/process', upload.single('file'), async (req, res) => {
-  const { user_id, prompt, session_id, isInspection, model_id } = req.body
+app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.single('file'), async (req, res) => {
+  const { prompt, session_id, isInspection, model_id } = req.body
   const filePath = req.file ? req.file.path : null
   const isInspectionFlag = isInspection === 'true' || isInspection === true || !!filePath
-  const userId = Number(user_id)
-  if (!userId) return res.fail(ErrorCode.PARAM_MISSING, '缺少 user_id')
+  const userId = getAuthUserId(req)
 
   try {
     console.log(`[Server] Processing: prompt=${prompt}, sessionId=${session_id}, isInspection=${isInspectionFlag}`)
@@ -377,7 +463,7 @@ app.post('/api/process', upload.single('file'), async (req, res) => {
     const { result, sessionId } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
     console.log(`[Server] AI result length: ${result ? result.length : 0}`)
 
-    const enterprise = await enterpriseDal.findByUserId(userId)
+    const enterprise = await enterpriseDal.findByUserOrganization(userId)
     const wordPath = await docService.generateWord(prompt, result, filePath, { enterprise })
     const pdfPath = await docService.generatePDF(prompt, result, filePath, { enterprise, wordPath })
 
@@ -387,7 +473,12 @@ app.post('/api/process', upload.single('file'), async (req, res) => {
     })
     await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, hasImage: !!filePath })
 
-    res.success({ result, wordPath, pdfPath, sessionId, id: historyId })
+    res.success({
+      result,
+      sessionId,
+      id: historyId,
+      ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
+    })
   } catch (err) {
     console.error('[Server] process error:', err)
     const code = err.message?.includes('AI') ? ErrorCode.AI_SERVICE_ERROR : ErrorCode.INTERNAL_ERROR
@@ -395,40 +486,46 @@ app.post('/api/process', upload.single('file'), async (req, res) => {
   }
 })
 
-app.post('/api/clear-session', async (req, res) => {
-  await aiService.clearSession(req.body.session_id)
+app.post('/api/clear-session', requireAuth, async (req, res) => {
+  const sessionId = String(req.body.session_id || '').trim()
+  if (!sessionId) return res.fail(ErrorCode.PARAM_MISSING)
+  const messages = await historyDal.findBySessionIdForUser(sessionId, getAuthUserId(req))
+  if (!messages.length) return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不存在')
+  await aiService.clearSession(sessionId)
   res.success()
 })
 
 // =========================================================================
 // 会话管理
 // =========================================================================
-app.get('/api/sessions/:user_id', async (req, res) => {
+app.get('/api/sessions', requireAuth, async (req, res) => {
   try {
-    const sessions = await historyDal.findSessionsByUserId(req.params.user_id)
+    const sessions = await historyDal.findSessionsByUserId(getAuthUserId(req))
     res.success(sessions)
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
   }
 })
 
-app.get('/api/session/:session_id', async (req, res) => {
+app.get('/api/session/:session_id', requireAuth, async (req, res) => {
   try {
-    const messages = await historyDal.findBySessionId(req.params.session_id)
-    const result = messages.map((m) => ({
-      ...m,
-      image_path: m.image_path ? 'uploads/' + m.image_path : null,
-    }))
+    const messages = await historyDal.findBySessionIdForUser(req.params.session_id, getAuthUserId(req))
+    if (!messages.length) return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不存在')
+    const result = messages.map((m) => mapHistoryRecordForClient(req, m))
     res.success(result)
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
   }
 })
 
-app.post('/api/session/delete', async (req, res) => {
+app.post('/api/session/delete', requireAuth, async (req, res) => {
+  const sessionId = String(req.body.session_id || '').trim()
+  if (!sessionId) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await historyDal.deleteBySessionId(req.body.session_id)
-    await aiService.clearSession(req.body.session_id)
+    const messages = await historyDal.findBySessionIdForUser(sessionId, getAuthUserId(req))
+    if (!messages.length) return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不存在')
+    await historyDal.deleteBySessionIdForUser(sessionId, getAuthUserId(req))
+    await aiService.clearSession(sessionId)
     res.success(null, '会话已删除')
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
@@ -438,26 +535,24 @@ app.post('/api/session/delete', async (req, res) => {
 // =========================================================================
 // 9.6 编辑保存分析结果
 // =========================================================================
-app.post('/api/history/update-result', async (req, res) => {
-  const { id, result, user_id } = req.body
-  if (!id || !result || !user_id) return res.fail(ErrorCode.PARAM_MISSING)
+app.post('/api/history/update-result', requireAuth, requirePermission('analysis:run'), async (req, res) => {
+  const { id, result } = req.body
+  const userId = getAuthUserId(req)
+  if (!id || !result) return res.fail(ErrorCode.PARAM_MISSING)
 
   try {
     const record = await historyDal.findById(id)
     if (!record) return res.fail(ErrorCode.RECORD_NOT_FOUND)
-    if (record.user_id !== Number(user_id)) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限修改此记录')
+    if (record.user_id !== userId) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限修改此记录')
 
     let reportImages = record.image_path
     try {
       const parsed = JSON.parse(String(result).trim())
-      const ids = Array.isArray(parsed?.items)
-        ? parsed.items.map((i) => Number(i.image_id)).filter((v) => Number.isFinite(v) && v > 0)
-        : []
+      const selectedImages = await inspectionReportImageDal.findByReportId(id)
+      const ids = selectedImages.map((item) => Number(item.id)).filter((v) => Number.isFinite(v) && v > 0)
       if (ids.length) {
-        const imgs = await hazardImageDal.findByIds(Number(user_id), ids)
+        const imgs = await hazardImageDal.findByIds(userId, ids)
         reportImages = imgs.map((img) => path.join(C.UPLOAD_DIR, String(img.file_path || '')))
-        await inspectionReportImageDal.unlinkAll(id)
-        await inspectionReportImageDal.linkImages(id, ids)
       }
     } catch (e) { /* JSON 解析失败则保持原样 */ }
 
@@ -489,8 +584,8 @@ app.post('/api/history/update-result', async (req, res) => {
     }
 
     await historyDal.updateResult(id, result, wordPath, pdfPath)
-    await logDal.logAction(user_id, C.ACTION_UPDATE_INSPECTION_RESULT, { id })
-    res.success({ wordPath, pdfPath }, '保存成功')
+    await logDal.logAction(userId, C.ACTION_UPDATE_INSPECTION_RESULT, { id })
+    res.success(buildReportDownloadUrls(req, id, wordPath, pdfPath), '保存成功')
   } catch (err) {
     console.error('[Server] update result error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR, err.message)
@@ -500,10 +595,10 @@ app.post('/api/history/update-result', async (req, res) => {
 // =========================================================================
 // 报告管理（9.7）
 // =========================================================================
-app.post('/api/history/delete', async (req, res) => {
-  const userId = Number(req.body.user_id)
+app.post('/api/history/delete', requireAuth, requirePermission('report:download'), async (req, res) => {
+  const userId = getAuthUserId(req)
   const id = Number(req.body.id)
-  if (!userId || !id) return res.fail(ErrorCode.PARAM_MISSING)
+  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
 
   try {
     const record = await historyDal.findById(id)
@@ -513,8 +608,8 @@ app.post('/api/history/delete', async (req, res) => {
     await inspectionReportImageDal.unlinkAll(id)
     await historyDal.deleteById(userId, id)
 
-    if (record.word_path) fs.unlink(path.join(C.UPLOAD_DIR, String(record.word_path)), () => {})
-    if (record.pdf_path) fs.unlink(path.join(C.UPLOAD_DIR, String(record.pdf_path)), () => {})
+    if (record.word_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.word_path), () => {})
+    if (record.pdf_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.pdf_path), () => {})
 
     await logDal.logAction(userId, C.ACTION_DELETE_REPORT, { id })
     res.success(null, '已删除')
@@ -527,7 +622,7 @@ app.post('/api/history/delete', async (req, res) => {
 // =========================================================================
 // 知识库
 // =========================================================================
-app.get('/api/knowledge/list', async (req, res) => {
+app.get('/api/knowledge/list', requireAuth, requirePermission('knowledge:view'), async (req, res) => {
   try {
     const list = await knowledgeService.getAllKnowledge()
     res.success(list)
@@ -536,7 +631,7 @@ app.get('/api/knowledge/list', async (req, res) => {
   }
 })
 
-app.get('/api/knowledge/categories/list', async (req, res) => {
+app.get('/api/knowledge/categories/list', requireAuth, requirePermission('knowledge:view'), async (req, res) => {
   try {
     const list = await knowledgeCategoryDal.findAll()
     res.success(list)
@@ -545,46 +640,13 @@ app.get('/api/knowledge/categories/list', async (req, res) => {
   }
 })
 
-app.post('/api/knowledge/upload', upload.single('file'), async (req, res) => {
-  const { title, description, category_id } = req.body
-  if (!req.file) return res.fail(ErrorCode.FILE_REQUIRED)
-  try {
-    const filePath = req.file.path.replace(/\\/g, '/')
-    await knowledgeService.addKnowledge(title, filePath, description, category_id ? Number(category_id) : null)
-    res.success(null, '上传成功')
-  } catch (err) {
-    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
-  }
-})
-
-app.post('/api/knowledge/update', async (req, res) => {
-  const { id, title, description, category_id } = req.body
-  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
-  try {
-    await knowledgeService.updateKnowledge(id, title, description, category_id ? Number(category_id) : null)
-    res.success(null, '更新成功')
-  } catch (err) {
-    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
-  }
-})
-
-app.post('/api/knowledge/delete', async (req, res) => {
-  if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
-  try {
-    await knowledgeService.deleteKnowledge(req.body.id)
-    res.success(null, '已归档')
-  } catch (err) {
-    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
-  }
-})
-
 // =========================================================================
 // 历史记录
 // =========================================================================
-app.get('/api/history/:user_id', async (req, res) => {
+app.get('/api/history', requireAuth, requirePermission('report:download'), async (req, res) => {
   try {
-    const history = await historyDal.findByUserId(req.params.user_id)
-    res.success(history)
+    const history = await historyDal.findByUserId(getAuthUserId(req))
+    res.success(history.map((item) => mapHistoryRecordForClient(req, item)))
   } catch (err) {
     console.error('[Server] history error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR)
@@ -676,21 +738,21 @@ app.post('/api/admin/history', adminAuth, async (req, res) => {
 // =========================================================================
 // 企业信息管理
 // =========================================================================
-app.post('/api/enterprise/get', async (req, res) => {
-  if (!req.body.user_id) return res.fail(ErrorCode.PARAM_MISSING, '缺少 user_id')
+app.post('/api/enterprise/get', requireAuth, requirePermission('enterprise:manage'), async (req, res) => {
   try {
-    const data = await enterpriseDal.findByUserOrganization(req.body.user_id)
+    const data = await enterpriseDal.findByUserOrganization(getAuthUserId(req))
     res.success(data || {})
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
   }
 })
 
-app.post('/api/enterprise/update', async (req, res) => {
-  const { user_id, name } = req.body
-  if (!user_id || !name) return res.fail(ErrorCode.PARAM_MISSING)
+app.post('/api/enterprise/update', requireAuth, requirePermission('enterprise:manage'), async (req, res) => {
+  const userId = getAuthUserId(req)
+  const { name } = req.body
+  if (!name) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    const enterprise = await enterpriseDal.findByUserOrganization(user_id)
+    const enterprise = await enterpriseDal.findByUserOrganization(userId)
     if (!enterprise) {
       return res.fail(ErrorCode.PARAM_INVALID, '当前用户尚未分配所属企业和部门')
     }
@@ -701,10 +763,91 @@ app.post('/api/enterprise/update', async (req, res) => {
       inspector_name, inspection_date,
       project_name,
     })
-    await logDal.logAction(user_id, C.ACTION_UPDATE_ENTERPRISE, { name })
+    await logDal.logAction(userId, C.ACTION_UPDATE_ENTERPRISE, { name })
     res.success(null, '企业信息已更新')
   } catch (err) {
     res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+// =========================================================================
+// 受控文件访问
+// =========================================================================
+app.get('/api/files/hazard-images/:image_id', async (req, res) => {
+  const imageId = Number(req.params.image_id)
+  if (!imageId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const auth = await resolveFileRequestAuth(req, {
+      resourceType: 'hazard-image',
+      resourceId: imageId,
+    })
+    if (auth.user.role !== C.ROLE_ADMIN && !auth.permissions?.['image:manage']) {
+      return res.fail(ErrorCode.PERMISSION_DENIED, '当前账号没有此操作权限')
+    }
+    const record = await hazardImageDal.findById(imageId)
+    const isOwner = Number(record?.user_id) === Number(auth.userId)
+    if (!record || (auth.user.role !== C.ROLE_ADMIN && !isOwner)) {
+      return res.fail(ErrorCode.IMAGE_NOT_FOUND)
+    }
+    return sendControlledUploadFile(res, resolveUploadAbsolutePath(C.UPLOAD_DIR, record.file_path))
+  } catch (err) {
+    console.error('[Server] hazard image file error:', err)
+    res.fail(ErrorCode.UNAUTHORIZED, err.message)
+  }
+})
+
+app.get('/api/files/reports/:report_id/image', async (req, res) => {
+  const reportId = Number(req.params.report_id)
+  if (!reportId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const auth = await resolveFileRequestAuth(req, {
+      resourceType: 'report-image',
+      resourceId: reportId,
+    })
+    if (auth.user.role !== C.ROLE_ADMIN && !auth.permissions?.['report:download']) {
+      return res.fail(ErrorCode.PERMISSION_DENIED, '当前账号没有此操作权限')
+    }
+    const record = await historyDal.findById(reportId)
+    const isOwner = Number(record?.user_id) === Number(auth.userId)
+    if (!record || (auth.user.role !== C.ROLE_ADMIN && !isOwner)) {
+      return res.fail(ErrorCode.RECORD_NOT_FOUND)
+    }
+
+    const linkedImages = await inspectionReportImageDal.findByReportId(reportId)
+    const targetImage = linkedImages[0] || (record.image_path ? { file_path: record.image_path } : null)
+    if (!targetImage?.file_path) return res.fail(ErrorCode.IMAGE_NOT_FOUND)
+
+    return sendControlledUploadFile(res, resolveUploadAbsolutePath(C.UPLOAD_DIR, targetImage.file_path))
+  } catch (err) {
+    console.error('[Server] report image file error:', err)
+    res.fail(ErrorCode.UNAUTHORIZED, err.message)
+  }
+})
+
+app.get('/api/files/reports/:report_id/:format', async (req, res) => {
+  const reportId = Number(req.params.report_id)
+  const format = String(req.params.format || '').trim().toLowerCase()
+  if (!reportId || !['word', 'pdf'].includes(format)) return res.fail(ErrorCode.PARAM_INVALID)
+  try {
+    const auth = await resolveFileRequestAuth(req, {
+      resourceType: 'report',
+      resourceId: reportId,
+      format,
+    })
+    if (auth.user.role !== C.ROLE_ADMIN && !auth.permissions?.['report:download']) {
+      return res.fail(ErrorCode.PERMISSION_DENIED, '当前账号没有此操作权限')
+    }
+    const record = await historyDal.findById(reportId)
+    const isOwner = Number(record?.user_id) === Number(auth.userId)
+    if (!record || (auth.user.role !== C.ROLE_ADMIN && !isOwner)) {
+      return res.fail(ErrorCode.RECORD_NOT_FOUND)
+    }
+
+    const storedPath = format === 'word' ? record.word_path : record.pdf_path
+    return sendControlledUploadFile(res, resolveUploadAbsolutePath(C.UPLOAD_DIR, storedPath))
+  } catch (err) {
+    console.error('[Server] report file error:', err)
+    res.fail(ErrorCode.UNAUTHORIZED, err.message)
   }
 })
 

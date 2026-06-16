@@ -16,8 +16,8 @@
             <text class="item-result">{{ item.result.substring(0, 100) }}...</text>
           </view>
           <view class="item-actions">
-            <button class="mini-btn dl-btn" @click="handleDownload(item.word_path)">Word</button>
-            <button class="mini-btn dl-btn" @click="handleDownload(item.pdf_path)">PDF</button>
+            <button class="mini-btn dl-btn" @click="handleDownload(item.wordPath || item.word_path)">Word</button>
+            <button class="mini-btn dl-btn" @click="handleDownload(item.pdfPath || item.pdf_path)">PDF</button>
             <button class="mini-btn view-btn" @click="handleViewDetail(item)">鏌ョ湅鍏ㄦ枃</button>
             <button class="mini-btn delete-btn" @click="handleDelete(item)">鍒犻櫎</button>
           </view>
@@ -29,7 +29,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { apiUrl, assetUrl, clearLoginSession, downloadFile, getStoredUser, request } from '../../common/api-config'
+import { apiUrl, clearLoginSession, downloadFile, fileUrl, getStoredUser, request } from '../../common/api-config'
 
 const historyList = ref([])
 const user = ref({})
@@ -47,7 +47,7 @@ onMounted(() => {
 
 const fetchHistory = () => {
   request({
-    url: apiUrl(`/api/history/${user.value.id}`),
+    url: apiUrl('/api/history'),
     method: 'GET',
   }).then((res) => {
     const data = res.data
@@ -64,7 +64,7 @@ const formatDate = (dateStr) => {
 
 const handleDownload = (path) => {
   if (!path) return
-  const url = assetUrl(path)
+  const url = fileUrl(path)
 
   // #ifdef H5
   window.open(url)
@@ -104,7 +104,7 @@ const handleDelete = (item) => {
       request({
         url: apiUrl('/api/history/delete'),
         method: 'POST',
-        data: { user_id: user.value.id, id: item.id },
+        data: { id: item.id },
       }).then((response) => {
         if (response.data?.success) {
           uni.showToast({ title: '宸插垹闄?' })
