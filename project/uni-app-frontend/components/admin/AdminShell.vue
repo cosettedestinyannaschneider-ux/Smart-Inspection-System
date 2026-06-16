@@ -1,25 +1,28 @@
 <template>
   <view class="admin-shell">
+    <!-- H5 宽屏顶部导航 -->
     <view class="desktop-header">
       <view class="desktop-brand" @click="goToMenu('home')">
-        <view class="brand-shield">鈼?/view>
-        <text class="brand-name">鏅烘绯荤粺</text>
+        <view class="brand-shield">◇</view>
+        <text class="brand-name">智检系统</text>
       </view>
       <view class="desktop-account">
-        <view class="account-avatar">鈼?/view>
-        <text>{{ currentUser.username || '绠＄悊鍛?' }}</text>
-        <text class="account-arrow">鈱?/text>
-        <text class="account-logout" @click="handleLogout">閫€鍑?/text>
+        <view class="account-avatar">●</view>
+        <text>{{ currentUser.username || '管理员' }}</text>
+        <text class="account-arrow">⌄</text>
+        <text class="account-logout" @click="handleLogout">退出</text>
       </view>
     </view>
 
+    <!-- 微信小程序与小屏 H5 顶部导航 -->
     <view class="mobile-header">
-      <text v-if="activeKey !== 'home'" class="mobile-back" @click="goBack">鈥?/text>
+      <text v-if="activeKey !== 'home'" class="mobile-back" @click="goBack">‹</text>
       <text class="mobile-title">{{ title }}</text>
-      <text v-if="activeKey === 'home'" class="mobile-mark">鈱?/text>
+      <text v-if="activeKey === 'home'" class="mobile-mark">⌗</text>
     </view>
 
     <view class="admin-body">
+      <!-- H5 宽屏左侧导航 -->
       <view class="desktop-sidebar">
         <view class="sidebar-menu">
           <view
@@ -35,6 +38,7 @@
         </view>
       </view>
 
+      <!-- 页面业务内容 -->
       <scroll-view scroll-y class="admin-content">
         <view class="admin-content-inner" :class="{ 'wide-content': wide }">
           <slot></slot>
@@ -48,27 +52,34 @@
 import { ref, onMounted } from 'vue'
 import { apiUrl, clearLoginSession, getStoredUser, request } from '../../common/api-config'
 
+/** 页面参数 */
 const props = defineProps({
   activeKey: { type: String, default: 'home' },
-  title: { type: String, default: '鏅烘绯荤粺' },
+  title: { type: String, default: '智检系统' },
   wide: { type: Boolean, default: false }
 })
 
+/** 向业务页面返回已校验的管理员信息 */
 const emit = defineEmits(['ready'])
+
+/** 当前已登录管理员 */
 const currentUser = ref({})
 
+/** 管理员端统一导航配置 */
 const menuItems = [
-  { key: 'home', label: '棣栭〉', symbol: '鈱?' },
-  { key: 'users', label: '鐢ㄦ埛绠＄悊', symbol: '鈾?' },
-  { key: 'knowledge', label: '鐭ヨ瘑搴撶鐞?', symbol: '鈻?' },
-  { key: 'model-config', label: 'AI 妯″瀷閰嶇疆', symbol: '鈼?' },
-  { key: 'enterprises', label: '浼佷笟鏁版嵁鏌ヨ', symbol: '鈻?' },
-  { key: 'logs', label: '鎿嶄綔鏃ュ織', symbol: '鈮?' },
-  { key: 'templates', label: '鎶ュ憡妯℃澘', symbol: '鈻?' },
-  { key: 'backup', label: '鏁版嵁澶囦唤', symbol: '鈻?' }
+  { key: 'home', label: '首页', symbol: '⌂' },
+  { key: 'users', label: '用户管理', symbol: '♙' },
+  { key: 'knowledge', label: '知识库管理', symbol: '▤' },
+  { key: 'model-config', label: 'AI 模型配置', symbol: '◇' },
+  { key: 'enterprises', label: '企业数据查询', symbol: '▥' },
+  { key: 'logs', label: '操作日志', symbol: '≡' },
+  { key: 'templates', label: '报告模板', symbol: '▧' },
+  { key: 'backup', label: '数据备份', symbol: '▣' }
 ]
 
+/** 初始化时统一校验管理员身份 */
 onMounted(() => {
+  /** 本地存储中的当前登录用户 */
   const user = getStoredUser()
   if (!user || user.role !== 'admin' || !user.id) {
     uni.reLaunch({ url: '/pages/login/login' })
@@ -78,6 +89,7 @@ onMounted(() => {
   emit('ready', user)
 })
 
+/** 跳转到管理员菜单页面 */
 const goToMenu = (key) => {
   if (key === props.activeKey) return
   if (key === 'home') {
@@ -87,14 +99,16 @@ const goToMenu = (key) => {
   uni.redirectTo({ url: `/pages/admin/${key}` })
 }
 
+/** 移动端返回管理员工作台 */
 const goBack = () => {
   uni.reLaunch({ url: '/pages/workbench/workbench' })
 }
 
+/** 退出当前管理员账号 */
 const handleLogout = () => {
   uni.showModal({
-    title: '閫€鍑虹櫥褰?',
-    content: '纭畾閫€鍑哄綋鍓嶇鐞嗗憳璐﹀彿鍚楋紵',
+    title: '退出登录',
+    content: '确定退出当前管理员账号吗？',
     success: (result) => {
       if (!result.confirm) return
       request({
@@ -110,6 +124,7 @@ const handleLogout = () => {
 </script>
 
 <style scoped>
+/* 管理员公共页面框架 */
 .admin-shell { height: 100vh; overflow: hidden; background: #f7f9fc; color: #152342; }
 .desktop-header {
   height: 54px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between;
@@ -144,6 +159,7 @@ const handleLogout = () => {
 .admin-content-inner { max-width: 930px; min-height: 100%; margin: 0 auto; padding: 32px 24px 32px; box-sizing: border-box; }
 .admin-content-inner.wide-content { max-width: 1180px; }
 
+/* 微信小程序与小屏 H5 使用移动端页面框架 */
 @media screen and (max-width: 900px) {
   .desktop-header, .desktop-sidebar { display: none; }
   .mobile-header {

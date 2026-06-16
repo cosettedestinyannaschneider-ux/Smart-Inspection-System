@@ -28,6 +28,7 @@
 
 实际初始化入口：
 
+- [schema.sql](C:/tmp/smart-inspection-phase1-auth1/project/database/schema.sql)
 - [schemaInit.js](C:/tmp/smart-inspection-phase1-auth1/project/backend/dal/schemaInit.js)
 
 ## 新增接口
@@ -142,10 +143,11 @@ npm run check
 
 已验证结果：
 
-- 通过，`[syntax-check] passed: 36 files`
+- 通过，`[syntax-check] passed: 37 files`
 
 ## 风险与兼容说明
 
+- 本 PR 已同步补齐 `auth_sessions` 的完整 DDL 到 `project/database/schema.sql`，避免初始化脚本与总设计 DDL 脱节。
 - 本 PR 先建立认证底座，用户业务接口仍暂时保留 `user_id` 传参兼容；彻底收口留到 Phase 1 PR2。
 - 现有页面大部分请求会通过全局 `uni.request / uploadFile / downloadFile` 包装自动带 Token。
 - 若环境未配置 `JWT_ACCESS_SECRET`，后端会使用开发兜底密钥，仅适用于本地调试。

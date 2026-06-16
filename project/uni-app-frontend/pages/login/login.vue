@@ -1,19 +1,19 @@
 <template>
   <view class="container login-container">
     <view class="card login-card">
-      <view class="brand-logo">馃洝锔?/view>
-      <text class="brand-name">鏅烘绯荤粺</text>
-      <text class="brand-slogan">瀹夊叏鐢熶骇绀句細鏈嶅姟骞冲彴</text>
+      <view class="brand-logo">🛡️</view>
+      <text class="brand-name">智检系统</text>
+      <text class="brand-slogan">安全生产社会服务平台</text>
 
       <view class="login-form">
         <view class="form-item">
-          <text class="label">璐﹀彿</text>
-          <input class="input" type="text" v-model="username" placeholder="璇疯緭鍏ョ敤鎴峰悕" />
+          <text class="label">账号</text>
+          <input class="input" type="text" v-model="username" placeholder="请输入用户名" />
         </view>
         <view class="form-item">
-          <text class="label">瀵嗙爜</text>
+          <text class="label">密码</text>
           <view class="password-input-wrapper">
-            <input class="input" type="text" :password="!showPassword" v-model="password" placeholder="璇疯緭鍏ュ瘑鐮?" />
+            <input class="input" type="text" :password="!showPassword" v-model="password" placeholder="请输入密码" />
             <image
               class="toggle-password-icon"
               :src="showPassword ? '/static/icons/eye-off.png' : '/static/icons/eye.png'"
@@ -21,10 +21,10 @@
             />
           </view>
         </view>
-        <button class="submit-btn" type="primary" :loading="loading" @click="handleLogin">鐧诲綍绯荤粺</button>
+        <button class="submit-btn" type="primary" :loading="loading" @click="handleLogin">登录系统</button>
         <view class="register-link">
-          <text class="text-muted">杩炴帴涓嶄笂锛?/text>
-          <text class="link-text" @click="goToSettings">鏈嶅姟鍣ㄨ缃?/text>
+          <text class="text-muted">连接不上？</text>
+          <text class="link-text" @click="goToSettings">服务器设置</text>
         </view>
       </view>
     </view>
@@ -46,7 +46,7 @@ const loading = ref(false)
  */
 const handleLogin = () => {
   if (!username.value || !password.value) {
-    uni.showToast({ title: '璇疯緭鍏ヨ处鍙峰拰瀵嗙爜', icon: 'none' })
+    uni.showToast({ title: '请输入账号和密码', icon: 'none' })
     return
   }
 
@@ -58,7 +58,7 @@ const handleLogin = () => {
   }).then((res) => {
     const result = unwrapResponse(res)
     if (!result.ok) {
-      uni.showToast({ title: result.msg || '鐧诲綍澶辫触', icon: 'none' })
+      uni.showToast({ title: result.msg || '登录失败', icon: 'none' })
       return
     }
 
@@ -67,7 +67,7 @@ const handleLogin = () => {
     const accessToken = payload.access_token || payload.data?.access_token
     const expiresAt = payload.expires_at || payload.data?.expires_at
     if (!nextUser?.id || !nextUser?.role || !accessToken) {
-      uni.showToast({ title: '鐧诲綍淇℃伅寮傚父锛岃閲嶈瘯', icon: 'none' })
+      uni.showToast({ title: '登录信息异常，请重试', icon: 'none' })
       return
     }
 
@@ -76,7 +76,7 @@ const handleLogin = () => {
       accessToken,
       expiresAt,
     })
-    uni.showToast({ title: '鐧诲綍鎴愬姛', icon: 'success' })
+    uni.showToast({ title: '登录成功', icon: 'success' })
     setTimeout(() => {
       if (nextUser.role === 'admin') {
         uni.reLaunch({ url: '/pages/workbench/workbench' })
@@ -86,7 +86,7 @@ const handleLogin = () => {
     }, 1000)
   }).catch((err) => {
     console.error('Login Fail:', err)
-    uni.showToast({ title: '缃戠粶閿欒锛岃妫€鏌ユ湇鍔″櫒璁剧疆/鍚堟硶鍩熷悕', icon: 'none' })
+    uni.showToast({ title: '网络错误，请检查服务器设置/合法域名', icon: 'none' })
   }).finally(() => {
     loading.value = false
   })

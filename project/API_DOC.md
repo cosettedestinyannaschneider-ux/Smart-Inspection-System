@@ -4,15 +4,22 @@
 
 ## 统一返回格式
 
+成功响应统一包含固定字段 `code`、`msg`、`success`。
+
+- 当业务数据是对象时，字段会直接平铺到响应顶层，便于兼容旧前端。
+- 当业务数据是数组、字符串、数字或 `null` 时，放在 `data` 字段中。
+
 ```json
-{ "code": 0, "msg": "ok", "data": {} }
+{ "code": 0, "msg": "ok", "success": true, "access_token": "jwt", "user": {} }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | code | number | 0 = 成功；1xxx 认证；2xxx 参数；3xxx 业务；4xxx 资源；5xxx 服务器 |
 | msg | string | 可读消息 |
-| data | any | 业务数据（成功时返回） |
+| success | boolean | 是否成功 |
+| data | any | 非对象类型的业务数据放在此字段 |
+| 其他业务字段 | any | 对象类型业务数据会平铺到顶层 |
 
 ## 错误码对照表
 
@@ -32,7 +39,10 @@
 | 3xxx 业务 | 3001 | AI 服务暂时不可用 |
 | | 3002 | 报告生成失败 |
 | | 3003 | 图片处理失败 |
+| | 3004 | 登录状态已过期 |
+| | 3005 | 登录已退出或已被禁用 |
 | 4xxx 资源 | 4001 | 资源不存在 |
+| | 4002 | 用户不存在 |
 | | 4003 | 未找到隐患照片 |
 | | 4004 | 记录不存在 |
 | 5xxx 服务 | 5001 | 服务器内部错误 |
@@ -44,7 +54,7 @@
 
 ### 0.1 服务状态
 - **URL**: `GET /api/health`
-- **返回**: `{ code: 0, msg: "Backend is running", data: { status: "running" } }`
+- **返回**: `{ code: 0, msg: "Backend is running", success: true, status: "running" }`
 
 ---
 
@@ -53,18 +63,70 @@
 ### 1.1 用户登录
 - **URL**: `POST /api/login`
 - **参数**: `username` (String), `password` (String)
-- **成功**: `{ code: 0, data: { id, username, role, department_id } }`
+- **成功**:
+
+```json
+{
+  "code": 0,
+  "msg": "ok",
+  "success": true,
+  "access_token": "jwt_access_token",
+  "token_type": "Bearer",
+  "expires_at": "2026-06-16T12:00:00.000Z",
+  "user": {
+    "id": 1,
+    "username": "demo",
+    "role": "user",
+    "department_id": 2,
+    "status": "active",
+    "permissions": {
+      "image:manage": true,
+      "analysis:run": true
+    }
+  }
+}
+```
 - **失败**: `{ code: 1002/1003/1004, msg: "..." }`
 
-### 1.2 用户注册
+### 1.2 获取当前登录用户
+- **URL**: `GET /api/auth/me`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **成功**:
+
+```json
+{
+  "code": 0,
+  "msg": "ok",
+  "success": true,
+  "user": {
+    "id": 1,
+    "username": "demo",
+    "role": "user",
+    "department_id": 2,
+    "status": "active",
+    "permissions": {
+      "image:manage": true
+    }
+  }
+}
+```
+
+### 1.3 用户退出登录
+- **URL**: `POST /api/logout`
+- **请求头**: `Authorization: Bearer <access_token>`
+- **成功**: `{ "code": 0, "msg": "已退出登录", "success": true, "data": null }`
+
+### 1.4 用户注册
 - **URL**: `POST /api/register`
 - **参数**: `username` (String), `password` (String), `role` (String, 默认 "user"), `department_id` (Number, 可选)
 - **成功**: `{ code: 0, msg: "注册成功" }`
 - **失败**: `{ code: 2003, msg: "用户名已存在" }`
 
-### 1.3 部门列表（公共）
+### 1.5 部门列表（公共）
 - **URL**: `GET /api/departments/list`
 - **返回**: `{ code: 0, data: [{ id, name, created_at }] }`
+
+> 说明：除认证相关接口外，普通用户业务接口当前仍保留 `user_id` 传参兼容，后续 Phase 1 PR2 会统一切换为以后端鉴权上下文为准。
 
 ---
 
