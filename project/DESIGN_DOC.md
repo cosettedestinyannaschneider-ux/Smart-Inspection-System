@@ -350,7 +350,7 @@ pages/
 ### 15.1 业务分层
 
 - 阶段 B 管理员路由分别位于 `backend/routes/admin/userRoutes.js`、`enterpriseRoutes.js` 和 `departmentRoutes.js`，`backend/server.js` 仅负责挂载路由。
-- 管理员鉴权位于 `backend/middleware/adminAuth.js`，阶段 B 路由错误响应转换位于 `backend/routes/admin/routeUtils.js`。
+- 管理员鉴权位于 `backend/middleware/adminAuth.js`，内部统一串联 `requireAuth` 与 `requireAdmin`，仅信任 Bearer Token 中的登录身份；阶段 B 路由错误响应转换位于 `backend/routes/admin/routeUtils.js`。
 - 用户及权限事务规则位于 `backend/bll/userService.js`。
 - 企业和部门组织规则位于 `backend/bll/organizationService.js`。
 - 权限持久化位于 `backend/dal/userPermissionDal.js`，使用关联表而非 JSON 字段。

@@ -269,7 +269,7 @@
 
 ## 8. 管理员接口
 
-> 鉴权：请求体携带 `admin_id`，或请求头 `X-Admin-Id`
+> 鉴权：请求头携带 `Authorization: Bearer <access_token>`，且当前登录用户角色必须为 `admin`
 
 ### 8.1 用户管理
 | 方法 | URL | 说明 |
@@ -290,7 +290,7 @@
 所有管理员用户接口均需通过请求头携带：
 
 ```http
-X-Admin-Id: 当前管理员用户ID
+Authorization: Bearer <access_token>
 ```
 
 ##### 用户列表
@@ -613,22 +613,22 @@ X-Admin-Id: 当前管理员用户ID
 
 ## 后端阶段 B 已实现接口（2026-06-09）
 
-所有接口均为 `POST`，必须携带有效管理员 `admin_id`。统一成功响应为 `{ "success": true, "code": 0, ... }`，业务校验失败返回明确 `msg`。
+所有接口均为 `POST`，必须携带有效管理员 `Authorization: Bearer <access_token>`。统一成功响应为 `{ "success": true, "code": 0, ... }`，业务校验失败返回明确 `msg`。
 
 | URL | 主要参数 | 返回或行为 |
 |---|---|---|
-| `/api/admin/users/list` | `admin_id` | 返回有效用户，包含企业、部门和 `permissions` 对象 |
-| `/api/admin/users/add` | `admin_id`、`username`、`password`、`role`、`department_id`、`permissions` | 事务新增用户与权限 |
-| `/api/admin/users/update` | `admin_id`、`target_id`、`username`、可选 `password`、`role`、`department_id`、`status`、`permissions` | 事务更新用户并完整替换权限；`status` 可选值为 `active` 或 `disabled`，用于启用/禁用用户 |
-| `/api/admin/users/delete` | `admin_id`、`target_id` | 软禁用用户；禁止禁用当前管理员；已禁用用户可通过 update 接口重新启用 |
-| `/api/admin/enterprises/list` | `admin_id` | 返回企业及 `department_count`、`user_count` |
-| `/api/admin/enterprises/add` | `admin_id`、`name` | 新增企业，不写入 `enterprises.user_id` |
-| `/api/admin/enterprises/update` | `admin_id`、`id`、`name` | 本阶段仅修改企业名称 |
-| `/api/admin/enterprises/delete` | `admin_id`、`id` | 存在部门、隐患图片或排查报告时拒绝删除 |
-| `/api/admin/departments/list` | `admin_id`、可选 `enterprise_id` | 返回部门及所属企业 ID |
-| `/api/admin/departments/add` | `admin_id`、`enterprise_id`、`name` | 新增企业内唯一部门 |
-| `/api/admin/departments/update` | `admin_id`、`id`、`enterprise_id`、`name` | 更新部门；有用户时禁止跨企业移动 |
-| `/api/admin/departments/delete` | `admin_id`、`id` | 存在正常或锁定用户时拒绝；仅有关联禁用用户时，事务内解除其部门关联后删除 |
+| `/api/admin/users/list` | 无业务必填参数 | 返回有效用户，包含企业、部门和 `permissions` 对象 |
+| `/api/admin/users/add` | `username`、`password`、`role`、`department_id`、`permissions` | 事务新增用户与权限 |
+| `/api/admin/users/update` | `target_id`、`username`、可选 `password`、`role`、`department_id`、`status`、`permissions` | 事务更新用户并完整替换权限；`status` 可选值为 `active` 或 `disabled`，用于启用/禁用用户 |
+| `/api/admin/users/delete` | `target_id` | 软禁用用户；禁止禁用当前管理员；已禁用用户可通过 update 接口重新启用 |
+| `/api/admin/enterprises/list` | 无业务必填参数 | 返回企业及 `department_count`、`user_count` |
+| `/api/admin/enterprises/add` | `name` | 新增企业，不写入 `enterprises.user_id` |
+| `/api/admin/enterprises/update` | `id`、`name` | 本阶段仅修改企业名称 |
+| `/api/admin/enterprises/delete` | `id` | 存在部门、隐患图片或排查报告时拒绝删除 |
+| `/api/admin/departments/list` | 可选 `enterprise_id` | 返回部门及所属企业 ID |
+| `/api/admin/departments/add` | `enterprise_id`、`name` | 新增企业内唯一部门 |
+| `/api/admin/departments/update` | `id`、`enterprise_id`、`name` | 更新部门；有用户时禁止跨企业移动 |
+| `/api/admin/departments/delete` | `id` | 存在正常或锁定用户时拒绝；仅有关联禁用用户时，事务内解除其部门关联后删除 |
 
 允许的权限 Key：`enterprise:manage`、`image:manage`、`analysis:run`、`report:download`、`knowledge:view`。非白名单权限会被后端拒绝且不会落库。
 
