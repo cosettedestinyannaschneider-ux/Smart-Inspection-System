@@ -48,6 +48,22 @@ ARK_MODEL=你的真实模型名称
 - Docker 本地数据库账号密码来自仓库根目录 `.env`
 - 后端 AI 配置来自 `project/backend/.env`
 - 两者都不会进入 Git
+- `compose.yaml` 不再内置默认数据库密码；如果 `.env` 未填写，`docker compose` 会直接报错提示
+
+### 3.4 填写数据库密码
+
+编辑仓库根目录 `.env`，至少补齐：
+
+```env
+MYSQL_ROOT_PASSWORD=你自己的本地 root 密码
+MYSQL_PASSWORD=你自己的本地应用库密码
+```
+
+建议：
+
+- 不要继续使用示例占位值
+- 开发、演示、正式环境使用不同密码
+- 不要把根目录 `.env` 或 `project/backend/.env` 打包、截图或提交到仓库
 
 ## 4. 启动命令
 
