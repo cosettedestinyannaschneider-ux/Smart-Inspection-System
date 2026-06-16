@@ -12,6 +12,7 @@ const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
 const modelConfigService = require('./bll/modelConfigService')
 const adminWorkbenchService = require('./bll/adminWorkbenchService')
+const reportTemplateService = require('./bll/reportTemplateService')
 
 // ---- 数据访问层 ----
 const historyDal = require('./dal/historyDal')
@@ -23,7 +24,6 @@ const hazardImageDal = require('./dal/hazardImageDal')
 const sessionDal = require('./dal/sessionDal')
 const departmentDal = require('./dal/departmentDal')
 const aiModelConfigDal = require('./dal/aiModelConfigDal')
-const reportTemplateDal = require('./dal/reportTemplateDal')
 const inspectionReportImageDal = require('./dal/inspectionReportImageDal')
 const knowledgeCategoryDal = require('./dal/knowledgeCategoryDal')
 
@@ -80,14 +80,18 @@ app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.sendStatus(200)
   const requestPath = String(req.path || '').replace(/^\/+/, '')
-  if (!isPublicStaticUploadPath(requestPath, C.HAZARD_UPLOAD_SUBDIR)) {
+  if (!isPublicStaticUploadPath(requestPath, C.HAZARD_UPLOAD_SUBDIR, [C.REPORT_TEMPLATE_UPLOAD_SUBDIR])) {
     return res.status(404).end()
   }
   next()
 }, express.static(C.UPLOAD_DIR))
 
 // 确保目录存在
-for (const dir of [C.UPLOAD_DIR, path.join(C.UPLOAD_DIR, C.HAZARD_UPLOAD_SUBDIR)]) {
+for (const dir of [
+  C.UPLOAD_DIR,
+  path.join(C.UPLOAD_DIR, C.HAZARD_UPLOAD_SUBDIR),
+  path.join(C.UPLOAD_DIR, C.REPORT_TEMPLATE_UPLOAD_SUBDIR),
+]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
 
@@ -106,7 +110,32 @@ const hazardUpload = multer({
   })
 })
 
+const reportTemplateUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(C.UPLOAD_DIR, C.REPORT_TEMPLATE_UPLOAD_SUBDIR)),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`),
+  }),
+  fileFilter: (req, file, cb) => {
+    if (!/\.docx$/i.test(String(file.originalname || ''))) {
+      cb(new Error('仅支持上传 DOCX 模板文件'))
+      return
+    }
+    cb(null, true)
+  },
+})
+
 // 初始化数据库
+/** 包装模板上传中间件，统一处理文件格式与缺失错误 */
+const useReportTemplateUpload = (fieldName) => (req, res, next) => {
+  reportTemplateUpload.single(fieldName)(req, res, (error) => {
+    if (!error) return next()
+    if (String(error.message || '').includes('DOCX')) {
+      return res.fail(ErrorCode.FILE_FORMAT_INVALID, error.message)
+    }
+    return res.fail(ErrorCode.FILE_REQUIRED, error.message || '模板文件上传失败')
+  })
+}
+
 schemaInit.init().catch(err => console.error('[Server] Schema init failed:', err))
 
 /** 统一读取当前登录用户 ID */
@@ -155,6 +184,23 @@ const buildReportImagePreviewUrl = (req, reportId) => buildFileUrl(
     resourceId: reportId,
   })
 )
+
+/** 缁熶竴鐢熸垚绠＄悊鍛樻ā鏉挎枃浠朵笅杞介摼鎺?*/
+const buildAdminTemplateDownloadUrl = (req, templateId) => buildFileUrl(
+  `/api/admin/templates/${templateId}/file`,
+  authService.createFileAccessToken({
+    userId: getAuthUserId(req),
+    jti: req.auth.jti,
+    resourceType: 'admin-report-template',
+    resourceId: templateId,
+  })
+)
+
+/** 灏嗘ā鏉胯褰曟槧灏勪负鍓嶇鍙洿鎺ュ睍绀虹殑缁撴瀯 */
+const mapTemplateRecordForClient = (req, record) => ({
+  ...record,
+  download_url: record?.has_file ? buildAdminTemplateDownloadUrl(req, record.id) : null,
+})
 
 /** 尝试读取 Bearer Token 或文件访问票据 */
 const resolveFileRequestAuth = async (req, expected) => {
@@ -905,41 +951,105 @@ app.post('/api/admin/config/ai/delete', adminAuth, async (req, res) => {
 // 管理员：报告模板管理
 // =========================================================================
 app.post('/api/admin/templates/list', adminAuth, async (req, res) => {
-  try { res.success(await reportTemplateDal.findAll()) }
-  catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
-})
-
-app.post('/api/admin/templates/add', adminAuth, async (req, res) => {
-  const { name } = req.body
-  if (!name) return res.fail(ErrorCode.PARAM_MISSING, '缺少模板名称')
   try {
-    const id = await reportTemplateDal.create(name, req.body.file_path || null, req.body.description || null, req.body.is_default ? 1 : 0)
-    res.success({ id })
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
+    const templates = await reportTemplateService.listForClient()
+    res.success(templates.map((item) => mapTemplateRecordForClient(req, item)))
+  } catch (err) {
+    res.fail(ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
-app.post('/api/admin/templates/update', adminAuth, async (req, res) => {
+app.post('/api/admin/templates/create', adminAuth, useReportTemplateUpload('file'), async (req, res) => {
+  try {
+    const created = await reportTemplateService.create(req.body, req.file)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ADD_REPORT_TEMPLATE, {
+      id: created.id,
+      name: created.name,
+      is_default: created.is_default,
+    }, req.ip)
+    res.success(mapTemplateRecordForClient(req, created), '模板已新增')
+  } catch (err) {
+    res.fail(
+      err.isTemplateError ? ErrorCode.PARAM_INVALID : ErrorCode.INTERNAL_ERROR,
+      err.message
+    )
+  }
+})
+
+app.post('/api/admin/templates/save', adminAuth, useReportTemplateUpload('file'), async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await reportTemplateDal.updateById(req.body.id, req.body)
-    res.success(null, '已更新')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
+    const updated = await reportTemplateService.update(req.body, req.file || null)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE, {
+      id: updated.id,
+      name: updated.name,
+      replaced_file: !!req.file,
+    }, req.ip)
+    res.success(mapTemplateRecordForClient(req, updated), '模板已更新')
+  } catch (err) {
+    res.fail(
+      err.isTemplateError ? ErrorCode.PARAM_INVALID : ErrorCode.INTERNAL_ERROR,
+      err.message
+    )
+  }
 })
 
-app.post('/api/admin/templates/set-default', adminAuth, async (req, res) => {
+app.post('/api/admin/templates/activate', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await reportTemplateDal.setDefault(req.body.id)
-    res.success(null, '已设为默认模板')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+    const updated = await reportTemplateService.setDefault(req.body.id)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_SET_REPORT_TEMPLATE_DEFAULT, {
+      id: updated.id,
+      name: updated.name,
+    }, req.ip)
+    res.success(mapTemplateRecordForClient(req, updated), '已设为默认模板')
+  } catch (err) {
+    res.fail(
+      err.isTemplateError ? ErrorCode.PARAM_INVALID : ErrorCode.INTERNAL_ERROR,
+      err.message
+    )
+  }
 })
 
-app.post('/api/admin/templates/delete', adminAuth, async (req, res) => {
+app.post('/api/admin/templates/remove', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await reportTemplateDal.deleteById(req.body.id)
+    const existing = await reportTemplateService.getById(req.body.id)
+    await reportTemplateService.delete(req.body.id)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_DELETE_REPORT_TEMPLATE, {
+      id: Number(existing.id),
+      name: existing.name,
+    }, req.ip)
     res.success(null, '已删除')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+  } catch (err) {
+    res.fail(
+      err.isTemplateError ? ErrorCode.PARAM_INVALID : ErrorCode.INTERNAL_ERROR,
+      err.message
+    )
+  }
+})
+
+app.get('/api/admin/templates/:template_id/file', async (req, res) => {
+  const templateId = Number(req.params.template_id)
+  if (!templateId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const auth = await resolveFileRequestAuth(req, {
+      resourceType: 'admin-report-template',
+      resourceId: templateId,
+    })
+    if (auth.user.role !== C.ROLE_ADMIN) {
+      return res.fail(ErrorCode.ADMIN_REQUIRED, '仅限管理员操作')
+    }
+    const record = await reportTemplateService.getById(templateId)
+    const absolutePath = resolveUploadAbsolutePath(C.UPLOAD_DIR, record.file_path)
+    if (!absolutePath) return res.fail(ErrorCode.NOT_FOUND, '模板文件不存在')
+    return sendControlledUploadFile(res, absolutePath)
+  } catch (err) {
+    res.fail(
+      err.isTemplateError ? ErrorCode.PARAM_INVALID : ErrorCode.UNAUTHORIZED,
+      err.message
+    )
+  }
 })
 
 // =========================================================================

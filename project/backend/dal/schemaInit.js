@@ -576,20 +576,61 @@ const schemaInit = {
   // Step 12: 报告模板表（立项书 §四(七)）
   // =========================================================================
   async step12_reportTemplates() {
-    if (await this._hasTable('report_templates')) return
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS report_templates (
-        id          INT           NOT NULL AUTO_INCREMENT,
-        name        VARCHAR(200)  NOT NULL,
-        file_path   VARCHAR(500)  DEFAULT NULL,
-        description TEXT          DEFAULT NULL,
-        is_default  TINYINT(1)    NOT NULL DEFAULT 0,
-        created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `)
-    console.log('[schemaInit] report_templates 已创建')
+    if (!await this._hasTable('report_templates')) {
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS report_templates (
+          id          INT           NOT NULL AUTO_INCREMENT,
+          name        VARCHAR(200)  NOT NULL,
+          file_path   VARCHAR(500)  DEFAULT NULL,
+          description TEXT          DEFAULT NULL,
+          is_default  TINYINT(1)    NOT NULL DEFAULT 0,
+          created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `)
+      console.log('[schemaInit] report_templates 已创建')
+    }
+
+    try {
+      const [rows] = await db.execute(`
+        SELECT
+          COUNT(*) AS total_count,
+          SUM(CASE WHEN is_default = 1 THEN 1 ELSE 0 END) AS default_count
+        FROM report_templates
+      `)
+      const totalCount = Number(rows[0]?.total_count || 0)
+      const defaultCount = Number(rows[0]?.default_count || 0)
+      if (totalCount > 0 && defaultCount === 0) {
+        await db.execute(`
+          UPDATE report_templates
+          SET is_default = 1
+          WHERE id = (
+            SELECT id FROM (
+              SELECT id FROM report_templates ORDER BY id ASC LIMIT 1
+            ) seeded_default
+          )
+        `)
+      } else if (defaultCount > 1) {
+        await db.execute(`
+          UPDATE report_templates
+          SET is_default = CASE
+            WHEN id = (
+              SELECT id FROM (
+                SELECT id
+                FROM report_templates
+                WHERE is_default = 1
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+              ) latest_default
+            ) THEN 1
+            ELSE 0
+          END
+        `)
+      }
+    } catch (error) {
+      console.warn('[schemaInit] report_templates default normalization failed:', error.message)
+    }
   },
 
   // =========================================================================

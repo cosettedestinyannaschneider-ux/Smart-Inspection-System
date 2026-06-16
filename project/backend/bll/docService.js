@@ -18,6 +18,7 @@ const PDFDocument = require('pdfkit')
 const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
+const reportTemplateService = require('./reportTemplateService')
 
 const FONT = 'SimHei'
 const A4_WIDTH = 11906
@@ -478,10 +479,11 @@ const makeImageParagraph = (filePath, width = 420, height = 300) => {
   }
 }
 
-const writeWordReportFromTemplate = async ({ reportData, compilerUnit, auditorName }) => {
-  const templatePath = path.join(__dirname, '..', 'templates', 'hazard_report_template.docx')
+const writeWordReportFromTemplate = async ({ reportData, compilerUnit, auditorName, templatePath = null }) => {
+  const fallbackTemplatePath = path.join(__dirname, '..', 'templates', 'hazard_report_template.docx')
+  const resolvedTemplatePath = templatePath || fallbackTemplatePath
   const scriptPath = path.join(__dirname, '..', 'tools', 'fillReportTemplate.py')
-  if (!fs.existsSync(templatePath) || !fs.existsSync(scriptPath)) return null
+  if (!fs.existsSync(resolvedTemplatePath) || !fs.existsSync(scriptPath)) return null
 
   const fileName = `report_${Date.now()}.docx`
   const wordPath = path.join('uploads', fileName)
@@ -502,7 +504,7 @@ const writeWordReportFromTemplate = async ({ reportData, compilerUnit, auditorNa
 
   try {
     fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2), 'utf8')
-    const result = spawnSync(getPythonCommand(), [scriptPath, templatePath, fullPath, payloadPath], {
+    const result = spawnSync(getPythonCommand(), [scriptPath, resolvedTemplatePath, fullPath, payloadPath], {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 60000,
@@ -720,8 +722,19 @@ const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comp
 
 const writeWordReport = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName }) => {
   const reportData = buildReportData({ prompt, result, imagePaths, enterprise })
-  const templateWordPath = await writeWordReportFromTemplate({ reportData, compilerUnit, auditorName })
+  const activeTemplatePath = await reportTemplateService.getDefaultTemplateAbsolutePath()
+  const templateWordPath = await writeWordReportFromTemplate({
+    reportData,
+    compilerUnit,
+    auditorName,
+    templatePath: activeTemplatePath,
+  })
   if (templateWordPath) return templateWordPath
+
+  const fallbackTemplateWordPath = activeTemplatePath
+    ? await writeWordReportFromTemplate({ reportData, compilerUnit, auditorName })
+    : null
+  if (fallbackTemplateWordPath) return fallbackTemplateWordPath
 
   const fileName = `report_${Date.now()}.docx`
   const wordPath = path.join('uploads', fileName)
