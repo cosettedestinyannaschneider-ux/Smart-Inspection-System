@@ -228,13 +228,26 @@
 
 ### 2. 操作日志联调
 
-- **状态**：待联调与扩展
+- **状态**：已完成基础真实联调（阶段 D，2026-06-16）
 - **前端页面**：`pages/admin/logs.vue`
-- `POST /api/admin/logs/list` 当前返回最近日志，建议支持 `keyword`、`module`、开始时间、结束时间和分页参数。
-- 返回字段应包含 `username`、`role`、`action`、`module`、`details`、`ip_address`、`created_at`。
-- 当前 `action_logs` 表没有 `module` 字段；后端可从 action 映射模块，或数据库增加模块字段。
+- `POST /api/admin/logs/list` 已返回最近 500 条真实日志。
+- 返回字段已包含 `username`、`role`、`action`、`module`、`details`、`ip_address`、`created_at`。
+- 当前 `action_logs` 表仍未新增 `module` 字段，本阶段由后端根据 `action` 统一映射模块并格式化详情文案。
+- 后续增强项可再补充 `keyword`、`module`、开始时间、结束时间和分页参数，当前 PR 不扩展查询协议。
 
-### 3. 报告模板联调
+### 3. 管理员工作台真实统计
+
+- **状态**：已完成基础真实联调（阶段 D，2026-06-16）
+- **前端页面**：`pages/workbench/workbench.vue`
+- 已新增 `POST /api/admin/workbench/stats`。
+- 当前工作台仅展示真实可计算指标：
+  - 企业总数
+  - 待分析图片数
+  - 报告总数
+  - 今日新增报告数
+- “待分析图片数” 当前口径为：已上传、状态有效且尚未关联任何排查报告的隐患图片数量。
+
+### 4. 报告模板联调
 
 - **状态**：待调整
 - **前端页面**：`pages/admin/templates.vue`
@@ -243,7 +256,7 @@
 - 后端必须禁止删除当前默认模板，设置默认模板应使用事务。
 - 模板更新接口必须使用允许字段白名单，禁止请求参数动态转换为任意数据库列。
 
-### 4. 数据备份后端建设
+### 5. 数据备份后端建设
 
 - **状态**：待开发
 - **前端页面**：`pages/admin/backup.vue`
@@ -259,7 +272,7 @@
 - 自动备份需要后端定时调度能力；第一阶段不使用消息队列。
 - 恢复数据库属于高风险操作，本阶段不提供前端恢复入口。
 
-### 5. 第三阶段数据库变更登记
+### 6. 第三阶段数据库变更登记
 
 - **本次前端开发 DDL**：无变更。
-- **后端实施结果**：`backup_records` 表与 `enterprises.inspection_status` 已完成；操作日志模块字段可根据后端实现方式决定是否落库。
+- **后端实施结果**：`backup_records` 表与 `enterprises.inspection_status` 已完成；操作日志模块本阶段未新增落库字段，继续采用后端映射模块。

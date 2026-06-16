@@ -116,6 +116,14 @@ const enterpriseDal = {
     return rows
   },
 
+  /** 统计有效企业总数，供管理员工作台使用 */
+  async countActiveEnterprises() {
+    const [rows] = await db.execute(
+      "SELECT COUNT(*) AS total FROM enterprises WHERE status = 'active'"
+    )
+    return Number(rows[0]?.total || 0)
+  },
+
   /**
    * 企业综合查询，聚合隐患图片、AI 分析、报告和隐患整改统计数据
    * @param {object} filters — 筛选条件

@@ -106,6 +106,20 @@ const historyDal = {
     `)
     return rows
   },
+
+  /** 统计工作台需要的报告数量指标 */
+  async getWorkbenchStats() {
+    const [rows] = await db.execute(`
+      SELECT
+        COUNT(*) AS report_total_count,
+        SUM(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) AS today_report_count
+      FROM inspection_reports
+    `)
+    return {
+      reportTotalCount: Number(rows[0]?.report_total_count || 0),
+      todayReportCount: Number(rows[0]?.today_report_count || 0),
+    }
+  },
 }
 
 module.exports = historyDal

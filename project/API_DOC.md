@@ -513,17 +513,43 @@ Authorization: Bearer <access_token>
 | POST | `/api/admin/templates/set-default` | 设为默认模板 |
 | POST | `/api/admin/templates/delete` | 删除模板 |
 
-### 8.6 操作日志
-- **URL**: `POST /api/admin/logs/list`
-- **返回**: 最近 500 条操作记录（含 IP 地址）
+### 8.6 管理员工作台统计
+- **URL**: `POST /api/admin/workbench/stats`
+- **返回**: 管理员工作台真实统计数据
 
-### 8.7 全量历史
+返回示例：
+
+```json
+{
+  "code": 0,
+  "success": true,
+  "data": {
+    "enterprise_count": 5,
+    "pending_image_count": 3,
+    "report_count": 25,
+    "today_report_count": 2
+  }
+}
+```
+
+统计口径说明：
+
+- `enterprise_count`：`enterprises.status = 'active'` 的企业总数
+- `pending_image_count`：已上传且 `status = 'active'`，但尚未关联任何排查报告的隐患图片数量
+- `report_count`：`inspection_reports` 总数
+- `today_report_count`：按数据库当前日期统计的当日新增报告数
+
+### 8.7 操作日志
+- **URL**: `POST /api/admin/logs/list`
+- **返回**: 最近 500 条操作记录（含 IP 地址、角色、模块和格式化详情）
+
+### 8.8 全量历史
 - **URL**: `POST /api/admin/history`
 - **返回**: 全量用户排查报告列表
 
-### 8.8 第三阶段前端对接约定
+### 8.9 第三阶段前端对接约定
 
-> 当前状态：企业数据查询、操作日志、报告模板和数据备份页面已完成 UI 与模拟交互，真实接口尚未接入。
+> 当前状态：企业数据查询、操作日志和管理员工作台已完成真实接口联调；报告模板和数据备份页面仍处于 UI 与模拟交互阶段。
 
 #### 企业综合查询目标接口
 
@@ -597,6 +623,26 @@ Authorization: Bearer <access_token>
   "created_at": "2026-06-09 09:30"
 }
 ```
+
+#### 管理员工作台统计接口
+
+`POST /api/admin/workbench/stats` 页面需要返回：
+
+```json
+{
+  "enterprise_count": 5,
+  "pending_image_count": 3,
+  "report_count": 25,
+  "today_report_count": 2
+}
+```
+
+字段说明：
+
+- `enterprise_count`：有效企业总数
+- `pending_image_count`：待分析图片数，统计尚未进入任何排查报告的有效隐患图片
+- `report_count`：报告总数
+- `today_report_count`：今日新增报告数
 
 #### 报告模板文件上传
 
