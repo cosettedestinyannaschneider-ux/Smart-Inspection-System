@@ -10,6 +10,7 @@ const authService = require('./bll/authService')
 const aiService = require('./bll/aiService')
 const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
+const modelConfigService = require('./bll/modelConfigService')
 
 // ---- 数据访问层 ----
 const historyDal = require('./dal/historyDal')
@@ -856,26 +857,21 @@ app.get('/api/files/reports/:report_id/:format', async (req, res) => {
 // =========================================================================
 app.post('/api/admin/config/ai', adminAuth, async (req, res) => {
   try {
-    const config = await aiModelConfigDal.findActive()
+    const config = await modelConfigService.getActiveForClient()
     res.success(config || {})
-  } catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+  } catch (err) { res.fail(ErrorCode.DATABASE_ERROR, err.message) }
 })
 
 app.post('/api/admin/config/ai/list', adminAuth, async (req, res) => {
-  try { res.success(await aiModelConfigDal.findAll()) }
-  catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+  try { res.success(await modelConfigService.listForClient()) }
+  catch (err) { res.fail(ErrorCode.DATABASE_ERROR, err.message) }
 })
 
 app.post('/api/admin/config/ai/add', adminAuth, async (req, res) => {
-  const { name, base_url, api_key, model_name } = req.body
-  if (!name || !base_url || !api_key || !model_name) return res.fail(ErrorCode.PARAM_MISSING)
+  const { name, provider, base_url, api_key, model_name } = req.body
+  if (!name || !provider || !base_url || !api_key || !model_name) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    const id = await aiModelConfigDal.create({
-      name, baseUrl: base_url, apiKeyEncrypted: api_key, modelName: model_name,
-      maxTokens: req.body.max_tokens || C.AI_DEFAULT_MAX_TOKENS,
-      temperature: req.body.temperature ?? C.AI_DEFAULT_TEMPERATURE,
-      timeoutMs: req.body.timeout_ms || C.AI_TIMEOUT_MS,
-    })
+    const { id } = await modelConfigService.create(req.body)
     res.success({ id })
   } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
 })
@@ -883,8 +879,7 @@ app.post('/api/admin/config/ai/add', adminAuth, async (req, res) => {
 app.post('/api/admin/config/ai/update', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    const { id, ...params } = req.body
-    await aiModelConfigDal.updateById(id, params)
+    await modelConfigService.update(req.body)
     res.success(null, '配置已更新')
   } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
 })
@@ -892,17 +887,17 @@ app.post('/api/admin/config/ai/update', adminAuth, async (req, res) => {
 app.post('/api/admin/config/ai/activate', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await aiModelConfigDal.setActive(req.body.id)
+    await modelConfigService.activate(req.body.id)
     res.success(null, '已切换为当前模型')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
 })
 
 app.post('/api/admin/config/ai/delete', adminAuth, async (req, res) => {
   if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await aiModelConfigDal.deleteById(req.body.id)
+    await modelConfigService.delete(req.body.id)
     res.success(null, '配置已删除')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
 })
 
 // =========================================================================

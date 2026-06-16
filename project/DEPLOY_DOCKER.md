@@ -41,6 +41,7 @@ Copy-Item E:\University\Project\project1.0\project\backend\.env.example E:\Unive
 ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_API_KEY=你的真实API密钥
 ARK_MODEL=你的真实模型名称
+MODEL_CONFIG_SECRET=用于加密模型配置API Key的长随机密钥
 ```
 
 说明：

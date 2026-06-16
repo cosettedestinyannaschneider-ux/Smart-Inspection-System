@@ -117,6 +117,9 @@ project/
 - `ARK_BASE_URL`
 - `ARK_API_KEY`
 - `ARK_MODEL`
+- `JWT_ACCESS_SECRET`
+- `JWT_ACCESS_EXPIRES_IN`
+- `MODEL_CONFIG_SECRET`
 - `PORT`
 
 推荐的 `.env` 示例：
@@ -131,6 +134,10 @@ DB_NAME=ai_project
 ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_API_KEY=你的模型API密钥
 ARK_MODEL=你的模型名称
+
+JWT_ACCESS_SECRET=用于登录态签名的长随机密钥
+JWT_ACCESS_EXPIRES_IN=8h
+MODEL_CONFIG_SECRET=用于加密 ai_model_configs.API Key 的长随机密钥
 
 PORT=3000
 ```

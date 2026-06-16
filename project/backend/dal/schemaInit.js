@@ -1,4 +1,5 @@
 const db = require('./db')
+const { hasModelConfigSecret, encryptApiKey } = require('../bll/modelConfigCryptoService')
 
 /**
  * 数据库结构初始化与迁移模块
@@ -554,9 +555,10 @@ const schemaInit = {
       const apiKey = process.env.ARK_API_KEY || ''
       const model = process.env.ARK_MODEL || 'deepseek-v3'
       try {
+        const storedApiKey = apiKey && hasModelConfigSecret() ? encryptApiKey(apiKey) : apiKey
         await db.execute(
           'INSERT IGNORE INTO ai_model_configs (name, provider, base_url, api_key_encrypted, model_name, is_active) VALUES (?, ?, ?, ?, ?, 1)',
-          ['default', '豆包', baseUrl, apiKey, model]
+          ['default', '豆包', baseUrl, storedApiKey, model]
         )
       } catch (e) { /* 忽略 */ }
       console.log('[schemaInit] ai_model_configs 已创建')

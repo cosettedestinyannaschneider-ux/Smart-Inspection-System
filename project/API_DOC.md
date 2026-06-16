@@ -438,11 +438,11 @@ Authorization: Bearer <access_token>
 | POST | `/api/admin/config/ai/activate` | 激活指定配置 |
 | POST | `/api/admin/config/ai/delete` | 删除配置 |
 
-> 新增配置示例：`{ name, base_url, api_key, model_name, max_tokens?, temperature?, timeout_ms? }`
+> 新增配置示例：`{ name, provider, base_url, api_key, model_name, max_tokens?, temperature?, timeout_ms? }`
 
 #### 8.4.1 第二阶段前端对接约定
 
-> 当前状态：知识库管理与 AI 模型配置页面已完成 UI 和模拟交互，真实接口尚未接入。
+> 当前状态：知识库管理页面仍为后续联调项；AI 模型配置页面已切换为真实接口，并统一只展示脱敏密钥。
 
 ##### 知识库接口参数
 
@@ -501,6 +501,8 @@ Authorization: Bearer <access_token>
 ```
 
 > 安全要求：AI 配置列表和当前配置接口均不得返回可还原的 API Key；详细整改任务见 `BACKEND_TODO.md`。
+>
+> 环境要求：若需要对 `ai_model_configs` 中的密钥做加密存储与运行时解密，后端必须配置 `MODEL_CONFIG_SECRET`。历史明文记录会在读取时自动迁移为密文。
 
 ### 8.5 报告模板管理
 | 方法 | URL | 说明 |

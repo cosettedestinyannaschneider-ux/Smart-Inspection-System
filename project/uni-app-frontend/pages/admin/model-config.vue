@@ -109,7 +109,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import AdminShell from '../../components/admin/AdminShell.vue'
-import { createAiModelConfigs } from '../../common/admin-mock-data'
+import { apiUrl, request, unwrapResponse } from '../../common/api-config'
 
 /** 当前管理员 */
 const user = ref({})
@@ -121,6 +121,8 @@ const showModal = ref(false)
 const isEdit = ref(false)
 /** API Key 可见状态 */
 const showKey = ref(false)
+/** 是否正在提交或刷新 */
+const loading = ref(false)
 
 /** 创建空白模型配置表单 */
 const createForm = () => ({ id: null, name: '', provider: '', base_url: '', api_key: '', model_name: '', max_tokens: 4096, temperature: 0.7, timeout_ms: 60000 })
@@ -128,16 +130,34 @@ const createForm = () => ({ id: null, name: '', provider: '', base_url: '', api_
 const form = ref(createForm())
 /** 当前启用模型 */
 const activeModel = computed(() => list.value.find(item => item.is_active) || null)
+/** 请求模型配置接口 */
+const postModelConfig = (path, payload = {}) => request({
+  url: apiUrl(path),
+  method: 'POST',
+  data: payload,
+}).then((response) => {
+  const result = unwrapResponse(response)
+  if (!result.ok) throw new Error(result.msg || '请求失败')
+  return result.raw
+})
 
 /** 公共框架鉴权完成后加载模型配置 */
-const handleAdminReady = (admin) => {
+const handleAdminReady = async (admin) => {
   user.value = admin
-  fetchModels()
+  await fetchModels()
 }
 
-/** 加载模型列表，后续对接 POST /api/admin/config/ai/list */
-const fetchModels = () => {
-  list.value = createAiModelConfigs()
+/** 加载模型列表 */
+const fetchModels = async () => {
+  loading.value = true
+  try {
+    const response = await postModelConfig('/api/admin/config/ai/list')
+    list.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    uni.showToast({ title: error?.message || '模型配置加载失败', icon: 'none' })
+  } finally {
+    loading.value = false
+  }
 }
 
 /** 打开新增模型弹窗 */
@@ -159,10 +179,12 @@ const openEdit = (model) => {
 /** 关闭模型弹窗 */
 const closeModal = () => {
   showModal.value = false
+  form.value = createForm()
+  showKey.value = false
 }
 
-/** 保存模型配置，后续对接新增或更新接口 */
-const saveModel = () => {
+/** 保存模型配置 */
+const saveModel = async () => {
   if (!form.value.name || !form.value.provider || !form.value.base_url || !form.value.model_name) {
     uni.showToast({ title: '请填写完整模型信息', icon: 'none' })
     return
@@ -171,15 +193,31 @@ const saveModel = () => {
     uni.showToast({ title: '请输入 API Key', icon: 'none' })
     return
   }
-  if (isEdit.value) {
-    /** 当前编辑模型在列表中的索引 */
-    const index = list.value.findIndex(item => item.id === form.value.id)
-    if (index >= 0) list.value[index] = { ...list.value[index], ...form.value, api_key_masked: form.value.api_key ? 'sk-****new' : list.value[index].api_key_masked }
-  } else {
-    list.value.push({ ...form.value, id: Date.now(), api_key_masked: 'sk-****new', is_active: false })
+  const payload = {
+    id: form.value.id,
+    name: form.value.name,
+    provider: form.value.provider,
+    base_url: form.value.base_url,
+    model_name: form.value.model_name,
+    api_key: form.value.api_key,
+    max_tokens: Number(form.value.max_tokens || 4096) || 4096,
+    temperature: Number(form.value.temperature ?? 0.7),
+    timeout_ms: Number(form.value.timeout_ms || 60000) || 60000,
   }
-  uni.showToast({ title: isEdit.value ? '配置已更新' : '配置已添加', icon: 'success' })
-  closeModal()
+  try {
+    loading.value = true
+    await postModelConfig(
+      isEdit.value ? '/api/admin/config/ai/update' : '/api/admin/config/ai/add',
+      isEdit.value ? payload : { ...payload, id: undefined }
+    )
+    uni.showToast({ title: isEdit.value ? '配置已更新' : '配置已添加', icon: 'success' })
+    closeModal()
+    await fetchModels()
+  } catch (error) {
+    uni.showToast({ title: error?.message || '保存失败', icon: 'none' })
+  } finally {
+    loading.value = false
+  }
 }
 
 /** 激活指定模型配置 */
@@ -187,10 +225,18 @@ const activate = (model) => {
   uni.showModal({
     title: '切换模型',
     content: `确定启用「${model.name}」吗？`,
-    success: (result) => {
+    success: async (result) => {
       if (!result.confirm) return
-      list.value.forEach(item => { item.is_active = item.id === model.id })
-      uni.showToast({ title: '当前模型已切换', icon: 'success' })
+      try {
+        loading.value = true
+        await postModelConfig('/api/admin/config/ai/activate', { id: model.id })
+        uni.showToast({ title: '当前模型已切换', icon: 'success' })
+        await fetchModels()
+      } catch (error) {
+        uni.showToast({ title: error?.message || '切换失败', icon: 'none' })
+      } finally {
+        loading.value = false
+      }
     }
   })
 }
@@ -204,10 +250,18 @@ const deleteModel = (model) => {
   uni.showModal({
     title: '确认删除',
     content: `确定删除「${model.name}」吗？`,
-    success: (result) => {
+    success: async (result) => {
       if (!result.confirm) return
-      list.value = list.value.filter(item => item.id !== model.id)
-      uni.showToast({ title: '配置已删除', icon: 'success' })
+      try {
+        loading.value = true
+        await postModelConfig('/api/admin/config/ai/delete', { id: model.id })
+        uni.showToast({ title: '配置已删除', icon: 'success' })
+        await fetchModels()
+      } catch (error) {
+        uni.showToast({ title: error?.message || '删除失败', icon: 'none' })
+      } finally {
+        loading.value = false
+      }
     }
   })
 }
