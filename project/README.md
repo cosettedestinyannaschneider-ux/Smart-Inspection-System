@@ -330,6 +330,8 @@ uni-app-frontend/unpackage/dist/dev/mp-weixin
 - `pages/admin/logs`：操作日志
 - `pages/admin/backup`：数据备份
 
+数据备份页当前支持真实手动 MySQL 备份。启用前需要在 `project/backend/.env` 配置 `MYSQLDUMP_BIN` 为本机 `mysqldump` 绝对路径；未配置时页面会显示不可用状态，不会生成模拟记录。备份文件存放在后端本地 `uploads/backups`，仅允许管理员通过受控接口下载。
+
 ## 10. 当前稳定版关键改动
 
 这一稳定版主要包含两组核心改动。

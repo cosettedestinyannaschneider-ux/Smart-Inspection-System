@@ -4,7 +4,7 @@ WORKDIR /app
 
 # 安装 Python 运行环境，支持模板填充脚本；PDF 转换在 Linux 下会自动降级
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-venv \
+  && apt-get install -y --no-install-recommends python3 python3-venv default-mysql-client \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./

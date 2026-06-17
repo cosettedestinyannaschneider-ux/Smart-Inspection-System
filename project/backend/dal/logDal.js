@@ -53,6 +53,7 @@ const ACTION_META_MAP = {
   [C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE]: { module: '报告模板', label: '更新报告模板' },
   [C.ACTION_ADMIN_DELETE_REPORT_TEMPLATE]: { module: '报告模板', label: '删除报告模板' },
   [C.ACTION_ADMIN_SET_REPORT_TEMPLATE_DEFAULT]: { module: '报告模板', label: '切换默认模板' },
+  [C.ACTION_ADMIN_CREATE_BACKUP]: { module: '数据备份', label: '创建手动数据库备份' },
 }
 
 /** 常用详情字段的中文标签 */
@@ -75,6 +76,8 @@ const DETAIL_LABEL_MAP = {
   hasImage: '包含图片',
   is_default: '默认模板',
   replaced_file: '替换文件',
+  file_name: '备份文件',
+  file_size: '文件大小',
   title: '文档标题',
   category_name: '分类名称',
   archived_count: '归档数量',
@@ -182,6 +185,8 @@ const formatDetails = (actionCode, rawDetails) => {
       return `删除报告模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
     case C.ACTION_ADMIN_SET_REPORT_TEMPLATE_DEFAULT:
       return `设为默认模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_CREATE_BACKUP:
+      return `创建手动数据库备份，记录 ID：${formatDetailValue('id', details.id)}，文件：${formatDetailValue('file_name', details.file_name)}，大小：${formatDetailValue('file_size', details.file_size)} 字节`
     default:
       return formatObjectDetails(details)
   }
