@@ -27,6 +27,7 @@ const schemaInit = {
     await this.step06_inspectionReportImages()
     await this.step08_knowledgeCategories()
     await this.step09_knowledge()
+    await this.step09KnowledgeClauses()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
     await this.step12_reportTemplates()
@@ -488,6 +489,8 @@ const schemaInit = {
     for (const colDef of [
       'file_size BIGINT UNSIGNED DEFAULT NULL',
       'file_type VARCHAR(20) DEFAULT NULL',
+      "parse_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
+      'parse_message VARCHAR(500) DEFAULT NULL',
       "status VARCHAR(20) NOT NULL DEFAULT 'active'",
       'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
     ]) {
@@ -499,6 +502,40 @@ const schemaInit = {
 
     // 外键
     await this._addFK('knowledge', 'fk_knowledge_category',
+      'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+  },
+
+  // =========================================================================
+  // Step 9.5: 知识库条款表（AI 报告引用依据）
+  // =========================================================================
+  async step09KnowledgeClauses() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS knowledge_clauses (
+        id            INT           NOT NULL AUTO_INCREMENT,
+        knowledge_id  INT           NOT NULL,
+        category_id   INT           DEFAULT NULL,
+        source_title  VARCHAR(300)  NOT NULL,
+        source_code   VARCHAR(100)  DEFAULT NULL,
+        clause_no     VARCHAR(100)  DEFAULT NULL,
+        content       TEXT          NOT NULL,
+        keywords      VARCHAR(500)  DEFAULT NULL,
+        sort          INT           NOT NULL DEFAULT 0,
+        status        VARCHAR(20)   NOT NULL DEFAULT 'active',
+        created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_kcl_knowledge_id (knowledge_id),
+        KEY idx_kcl_category_id (category_id),
+        KEY idx_kcl_source_code (source_code),
+        KEY idx_kcl_clause_no (clause_no),
+        KEY idx_kcl_status (status),
+        KEY idx_kcl_sort (sort)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await this._addFK('knowledge_clauses', 'fk_kcl_knowledge',
+      'FOREIGN KEY (knowledge_id) REFERENCES knowledge (id) ON DELETE CASCADE ON UPDATE CASCADE')
+    await this._addFK('knowledge_clauses', 'fk_kcl_category',
       'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
   },
 

@@ -76,6 +76,8 @@ const DETAIL_LABEL_MAP = {
   hasImage: '包含图片',
   is_default: '默认模板',
   replaced_file: '替换文件',
+  clause_count: '条款数量',
+  parse_status: '解析状态',
   file_name: '备份文件',
   file_size: '文件大小',
   title: '文档标题',

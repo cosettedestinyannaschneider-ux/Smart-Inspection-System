@@ -763,6 +763,14 @@ app.post('/api/admin/knowledge/list', adminAuth, async (req, res) => {
   }
 })
 
+app.post('/api/admin/knowledge/clauses/list', adminAuth, async (req, res) => {
+  try {
+    res.success(await knowledgeService.listClauses(req.body.knowledge_id || req.body.id))
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
 app.post('/api/admin/knowledge/categories/list', adminAuth, async (req, res) => {
   try {
     res.success(await knowledgeService.listCategories())
@@ -817,6 +825,8 @@ app.post('/api/admin/knowledge/add', adminAuth, useKnowledgeUpload('file'), asyn
       id: created.id,
       title: created.title,
       category_name: created.category_name || '未分类',
+      clause_count: created.clause_count,
+      parse_status: created.parse_status,
     }, req.ip)
     res.success(created, '知识条目已添加')
   } catch (err) {
@@ -844,6 +854,8 @@ app.post('/api/admin/knowledge/update', adminAuth, async (req, res) => {
       id: updated.id,
       title: updated.title,
       replaced_file: false,
+      clause_count: updated.clause_count,
+      parse_status: updated.parse_status,
     }, req.ip)
     res.success(updated, '知识条目已更新')
   } catch (err) {
@@ -858,6 +870,8 @@ app.post('/api/admin/knowledge/save', adminAuth, useKnowledgeUpload('file'), asy
       id: updated.id,
       title: updated.title,
       replaced_file: !!req.file,
+      clause_count: updated.clause_count,
+      parse_status: updated.parse_status,
     }, req.ip)
     res.success(updated, '知识条目已更新')
   } catch (err) {

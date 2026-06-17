@@ -221,7 +221,7 @@ CREATE TABLE inspection_report_images (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 8. 知识库分类表（立项书 §四(三) 知识库管理模块）
+-- 10. 知识库分类表（立项书 §四(三) 知识库管理模块）
 -- ============================================================================
 CREATE TABLE knowledge_categories (
   id          INT           NOT NULL AUTO_INCREMENT,
@@ -236,7 +236,7 @@ CREATE TABLE knowledge_categories (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 9. 知识库条目表（立项书 §四(三) 知识库管理模块）
+-- 11. 知识库条目表（立项书 §四(三) 知识库管理模块）
 -- ============================================================================
 CREATE TABLE knowledge (
   id          INT           NOT NULL AUTO_INCREMENT,
@@ -246,6 +246,8 @@ CREATE TABLE knowledge (
   file_type   VARCHAR(20)   DEFAULT NULL COMMENT 'pdf|docx|doc|image',
   description TEXT          DEFAULT NULL,
   category_id INT           DEFAULT NULL,
+  parse_status ENUM('pending','parsed','skipped','failed') NOT NULL DEFAULT 'pending' COMMENT '条款抽取状态',
+  parse_message VARCHAR(500) DEFAULT NULL COMMENT '条款抽取说明或失败原因',
   status      ENUM('active','archived') NOT NULL DEFAULT 'active',
   created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -259,7 +261,38 @@ CREATE TABLE knowledge (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 10. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
+-- 12. 知识库条款表（AI 报告引用依据）
+-- ============================================================================
+CREATE TABLE knowledge_clauses (
+  id            INT           NOT NULL AUTO_INCREMENT,
+  knowledge_id  INT           NOT NULL COMMENT '所属知识文档',
+  category_id   INT           DEFAULT NULL COMMENT '冗余分类，便于后续检索',
+  source_title  VARCHAR(300)  NOT NULL COMMENT '来源文档标题',
+  source_code   VARCHAR(100)  DEFAULT NULL COMMENT '法规或标准编号',
+  clause_no     VARCHAR(100)  DEFAULT NULL COMMENT '条款号',
+  content       TEXT          NOT NULL COMMENT '条款内容',
+  keywords      VARCHAR(500)  DEFAULT NULL COMMENT '关键词，用于 MySQL 关键词检索',
+  sort          INT           NOT NULL DEFAULT 0 COMMENT '条款顺序',
+  status        ENUM('active','archived') NOT NULL DEFAULT 'active',
+  created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_kcl_knowledge_id (knowledge_id),
+  KEY idx_kcl_category_id (category_id),
+  KEY idx_kcl_source_code (source_code),
+  KEY idx_kcl_clause_no (clause_no),
+  KEY idx_kcl_status (status),
+  KEY idx_kcl_sort (sort),
+  CONSTRAINT fk_kcl_knowledge
+    FOREIGN KEY (knowledge_id) REFERENCES knowledge (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_kcl_category
+    FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识库条款表';
+
+-- ============================================================================
+-- 13. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
 -- ============================================================================
 CREATE TABLE action_logs (
   id          INT           NOT NULL AUTO_INCREMENT,
@@ -278,7 +311,7 @@ CREATE TABLE action_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 11. AI 模型配置表（立项书 §四(四) AI大模型对接模块）
+-- 14. AI 模型配置表（立项书 §四(四) AI大模型对接模块）
 -- ============================================================================
 CREATE TABLE ai_model_configs (
   id                INT           NOT NULL AUTO_INCREMENT,
@@ -298,7 +331,7 @@ CREATE TABLE ai_model_configs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 12. 报告模板表（立项书 §四(七) 报告格式标准化）
+-- 15. 报告模板表（立项书 §四(七) 报告格式标准化）
 -- ============================================================================
 CREATE TABLE report_templates (
   id          INT           NOT NULL AUTO_INCREMENT,

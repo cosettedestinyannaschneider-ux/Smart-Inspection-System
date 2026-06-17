@@ -24,6 +24,10 @@
         <text class="summary-value purple">{{ selectedIds.length }}</text>
         <text class="summary-label">已选文档</text>
       </view>
+      <view class="summary-card">
+        <text class="summary-value orange">{{ totalClauseCount }}</text>
+        <text class="summary-label">结构化条款</text>
+      </view>
     </view>
 
     <view class="toolbar-card">
@@ -80,6 +84,13 @@
             <text>{{ item.file_name || '未上传文件' }}</text>
             <text>{{ item.updated_at || item.created_at || '待更新' }}</text>
           </view>
+          <view class="clause-row">
+            <text class="parse-tag" :class="parseStatusClass(item.parse_status)">
+              {{ parseStatusText(item.parse_status) }}
+            </text>
+            <text class="clause-count">{{ Number(item.clause_count || 0) }} 条款</text>
+          </view>
+          <text v-if="item.parse_message" class="parse-message">{{ item.parse_message }}</text>
         </view>
         <view class="card-actions">
           <text class="action-link" @click="openEdit(item)">编辑</text>
@@ -246,6 +257,10 @@ const filteredList = computed(() => {
   })
 })
 
+const totalClauseCount = computed(() => (
+  list.value.reduce((total, item) => total + Number(item.clause_count || 0), 0)
+))
+
 const showMessage = (title, icon = 'none') => {
   uni.showToast({ title, icon })
 }
@@ -275,6 +290,9 @@ const normalizeKnowledgeItem = (item = {}) => ({
   category_id: item.category_id ? Number(item.category_id) : null,
   file_name: String(item.file_name || item.file_path || '').trim(),
   file_type: String(item.file_type || '').toUpperCase(),
+  clause_count: Number(item.clause_count || 0) || 0,
+  parse_status: String(item.parse_status || 'pending'),
+  parse_message: String(item.parse_message || '').trim(),
 })
 
 const normalizeCategory = (item = {}) => ({
@@ -328,6 +346,18 @@ const fetchCategories = async () => {
 const getCategoryName = (categoryId) => (
   categories.value.find((item) => Number(item.id) === Number(categoryId))?.name || '未分类'
 )
+
+const parseStatusText = (status) => {
+  const map = {
+    parsed: '已解析',
+    skipped: '未抽取',
+    failed: '解析失败',
+    pending: '待解析',
+  }
+  return map[String(status || 'pending')] || '待解析'
+}
+
+const parseStatusClass = (status) => `status-${String(status || 'pending')}`
 
 const categoryCount = (categoryId) => (
   categoryId === 'all'
@@ -686,7 +716,7 @@ const deleteCategory = (category) => {
 .summary-grid {
   margin-bottom: 18px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
 }
 
@@ -711,6 +741,10 @@ const deleteCategory = (category) => {
 
 .summary-value.purple {
   color: #7650e8;
+}
+
+.summary-value.orange {
+  color: #d97706;
 }
 
 .summary-label {
@@ -890,6 +924,52 @@ const deleteCategory = (category) => {
   gap: 14px;
   color: #a0acbb;
   font-size: 10px;
+}
+
+.clause-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parse-tag {
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+}
+
+.status-parsed {
+  background: #e8f8f1;
+  color: #188b5b;
+}
+
+.status-skipped {
+  background: #f3f5f8;
+  color: #6f7d90;
+}
+
+.status-failed {
+  background: #fff1f0;
+  color: #d94b4b;
+}
+
+.status-pending {
+  background: #fff7e8;
+  color: #b86b00;
+}
+
+.clause-count {
+  color: #7f8ca0;
+  font-size: 10px;
+}
+
+.parse-message {
+  display: block;
+  margin-top: 5px;
+  color: #a26800;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .card-actions {
@@ -1145,6 +1225,7 @@ const deleteCategory = (category) => {
   }
 
   .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
     gap: 12rpx;
   }
 
@@ -1254,6 +1335,17 @@ const deleteCategory = (category) => {
     flex-direction: column;
     gap: 4rpx;
     font-size: 19rpx;
+  }
+
+  .clause-row {
+    margin-top: 12rpx;
+    gap: 10rpx;
+  }
+
+  .parse-tag,
+  .clause-count,
+  .parse-message {
+    font-size: 18rpx;
   }
 
   .card-actions {
