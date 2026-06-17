@@ -2,6 +2,8 @@ const fs = require('fs')
 const path = require('path')
 const knowledgeDal = require('../dal/knowledgeDal')
 const knowledgeCategoryDal = require('../dal/knowledgeCategoryDal')
+const knowledgeClauseDal = require('../dal/knowledgeClauseDal')
+const { extractClauses } = require('./knowledgeClauseExtractService')
 const C = require('../common/Constants')
 const { resolveUploadAbsolutePath } = require('../common/fileAccess')
 
@@ -118,9 +120,57 @@ const toClientKnowledge = (record) => {
     file_name: record.file_name || (filePath ? path.posix.basename(filePath) : ''),
     file_type: fileType || 'PDF',
     file_size: record.file_size ? Number(record.file_size) : null,
+    clause_count: Number(record.clause_count || 0),
+    parse_status: resolveParseStatus(record),
+    parse_message: record.parse_message || '',
     status: record.status,
     created_at: record.created_at,
     updated_at: record.updated_at,
+  }
+}
+
+/** 根据文件类型和条款数量推导条款抽取状态 */
+const resolveParseStatus = (record) => {
+  if (record?.parse_status) return record.parse_status
+  const fileType = String(record?.file_type || '').toLowerCase()
+  if (fileType === 'doc') return 'skipped'
+  return Number(record?.clause_count || 0) > 0 ? 'parsed' : 'pending'
+}
+
+/** 上传或替换文件后同步生成结构化条款；失败只记录状态，不阻断文件级管理 */
+const refreshClausesForKnowledge = async ({ knowledgeId, categoryId, title, description, storedFile }) => {
+  const absolutePath = resolveUploadAbsolutePath(C.UPLOAD_DIR, storedFile?.storedPath)
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    return {
+      status: 'failed',
+      reason: '知识库文件不存在，无法抽取条款',
+      clause_count: 0,
+    }
+  }
+
+  try {
+    const extracted = await extractClauses({
+      absolutePath,
+      fileType: storedFile.fileType,
+      knowledgeId,
+      categoryId,
+      sourceTitle: title,
+      description,
+    })
+
+    await knowledgeClauseDal.replaceByKnowledgeId(knowledgeId, extracted.clauses)
+    return {
+      status: extracted.status,
+      reason: extracted.reason || '',
+      clause_count: extracted.clauses.length,
+    }
+  } catch (error) {
+    await knowledgeClauseDal.replaceByKnowledgeId(knowledgeId, [])
+    return {
+      status: 'failed',
+      reason: error.message || '知识条款抽取失败',
+      clause_count: 0,
+    }
   }
 }
 
@@ -134,6 +184,13 @@ const knowledgeService = {
   /** 获取管理员知识库列表 */
   async listForAdmin() {
     return await this.listForClient()
+  },
+
+  /** 获取某个知识文档的结构化条款，供管理员检查抽取结果 */
+  async listClauses(knowledgeId) {
+    const targetId = normalizeKnowledgeId(knowledgeId)
+    await this.getById(targetId)
+    return await knowledgeClauseDal.findByKnowledgeId(targetId)
   },
 
   /** 获取知识分类列表 */
@@ -212,7 +269,22 @@ const knowledgeService = {
         file_type: storedFile.fileType,
       })
 
-      return toClientKnowledge(await knowledgeDal.findById(createdId))
+      const parseResult = await refreshClausesForKnowledge({
+        knowledgeId: createdId,
+        categoryId: normalized.categoryId,
+        title: normalized.title,
+        description: normalized.description,
+        storedFile,
+      })
+      await knowledgeDal.updateById(createdId, {
+        parse_status: parseResult.status,
+        parse_message: parseResult.reason || null,
+      })
+      return {
+        ...toClientKnowledge(await knowledgeDal.findById(createdId)),
+        parse_status: parseResult.status,
+        parse_message: parseResult.reason,
+      }
     } catch (error) {
       if (file) removeUploadedTempFile(file)
       throw error
@@ -248,7 +320,33 @@ const knowledgeService = {
         removeKnowledgeFile(existing.file_path)
       }
 
-      return toClientKnowledge(await knowledgeDal.findById(targetId))
+      let parseResult = null
+      if (storedFile) {
+        parseResult = await refreshClausesForKnowledge({
+          knowledgeId: targetId,
+          categoryId: normalized.categoryId,
+          title: normalized.title,
+          description: normalized.description,
+          storedFile,
+        })
+        await knowledgeDal.updateById(targetId, {
+          parse_status: parseResult.status,
+          parse_message: parseResult.reason || null,
+        })
+      } else {
+        await knowledgeClauseDal.syncKnowledgeMetadata(targetId, {
+          categoryId: normalized.categoryId,
+          sourceTitle: normalized.title,
+        })
+      }
+
+      return {
+        ...toClientKnowledge(await knowledgeDal.findById(targetId)),
+        ...(parseResult ? {
+          parse_status: parseResult.status,
+          parse_message: parseResult.reason,
+        } : {}),
+      }
     } catch (error) {
       if (file) removeUploadedTempFile(file)
       throw error
@@ -260,6 +358,7 @@ const knowledgeService = {
     const targetId = normalizeKnowledgeId(id)
     const existing = await this.getById(targetId)
     await knowledgeDal.archiveById(targetId)
+    await knowledgeClauseDal.archiveByKnowledgeId(targetId)
     return existing
   },
 
@@ -277,6 +376,7 @@ const knowledgeService = {
     if (!existingRecords.length) throw knowledgeError('未找到可归档的知识文档')
 
     await knowledgeDal.archiveMany(normalizedIds)
+    await knowledgeClauseDal.archiveByKnowledgeIds(normalizedIds)
     return existingRecords.map(toClientKnowledge)
   },
 

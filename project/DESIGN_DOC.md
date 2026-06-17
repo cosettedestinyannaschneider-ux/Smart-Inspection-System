@@ -59,7 +59,7 @@
 
 ### 3.3 数据层（MySQL + 本地文件）
 
-- **MySQL**：`ai_project` 库，15 张业务表（enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/action_logs/ai_model_configs/report_templates/backup_records），后续待新增 `knowledge_clauses` 等结构化知识表。
+- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge_clauses` 用于保存自动抽取的法规条款，为后续报告依据追溯提供结构化基础。
 - **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`、`uploads/report-templates/`；隐患图片、报告文件和报告模板均通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
@@ -172,10 +172,11 @@ pages/
 
 ```
 1. 上传 PDF/Word 文件 → 后端接收存入 uploads/
-2. 后端解析文档（pdf-parse / mammoth）
+2. 后端解析文档：PDF 使用 pdf-parse，DOCX 使用 jszip 读取 word/document.xml，DOC 旧二进制格式仅保留文件级管理
 3. 识别条款格式 → 拆分条款存入 knowledge_clauses 表
-4. 无法识别格式 → 按段落降级入库
-5. 管理员可编辑/删除/批量操作
+4. 无法识别明确条款编号时 → 按段落降级入库；无法抽取文本时保留知识文档并标记为待人工复核
+5. 管理员可查看条款数量和解析状态，可编辑/归档/批量操作知识文档
+6. 本阶段不改变 AI 分析流程，报告引用依据追溯将在后续 PR 从 knowledge_clauses 接入
 ```
 
 ## 8. 接口规范

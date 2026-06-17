@@ -9,6 +9,8 @@ const ALLOWED_COLUMNS = new Set([
   'file_type',
   'description',
   'category_id',
+  'parse_status',
+  'parse_message',
   'status',
 ])
 
@@ -21,9 +23,16 @@ const normalizeColumnName = (key) => String(key || '')
 const KNOWLEDGE_SELECT_SQL = `
   SELECT
     k.*,
-    c.name AS category_name
+    c.name AS category_name,
+    COALESCE(kcc.clause_count, 0) AS clause_count
   FROM knowledge k
   LEFT JOIN knowledge_categories c ON c.id = k.category_id
+  LEFT JOIN (
+    SELECT knowledge_id, COUNT(*) AS clause_count
+    FROM knowledge_clauses
+    WHERE status = 'active'
+    GROUP BY knowledge_id
+  ) kcc ON kcc.knowledge_id = k.id
 `
 
 const knowledgeDal = {

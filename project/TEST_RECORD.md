@@ -1,5 +1,49 @@
 # 功能测试记录
 
+## 阶段 F 第一轮：知识条款结构化入库（2026-06-17）
+
+### 变更范围
+
+- 新增 `knowledge_clauses` 表，用于保存知识文档自动抽取出的法规条款。
+- 为 `knowledge` 补充 `parse_status`、`parse_message`，记录条款抽取状态和复核说明。
+- 新增知识条款抽取服务：PDF 走 `pdf-parse`，DOCX 走 `jszip` 读取 `word/document.xml`，DOC 旧格式仅保留文件级管理。
+- 知识文档新增或替换文件后自动重建条款；只更新标题或分类时同步条款来源元数据，不重复解析文件。
+- 知识库列表返回 `clause_count` 和 `parse_status`，管理员页面展示结构化条款总数和单文档解析状态。
+- 新增管理员只读接口 `POST /api/admin/knowledge/clauses/list`，用于检查某个知识文档的条款抽取结果。
+
+### 数据库与配置
+
+- DDL 变更：新增 `knowledge_clauses` 表，并为 `knowledge` 新增 `parse_status`、`parse_message`。
+- `project/database/schema.sql` 已同步新增完整建表语句。
+- 新增后端依赖：`jszip`。
+- 本轮无新增环境变量，不涉及真实数据库密码、AI API Key 或证书。
+
+### 自动验证
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 46 files` | 通过 |
+| 前端 H5 构建 | `npm --prefix project/uni-app-frontend run build:h5` 通过，`DONE Build complete` | 通过 |
+| Git diff 空白检查 | `git diff --check` 通过，仅提示 Windows 换行转换警告 | 通过 |
+
+### 手动验证建议
+
+| 测试用例 | 预期结果 | 状态 |
+|---|---|---|
+| 上传 PDF 知识文档 | 文档保存成功，列表显示 `已解析`，条款数大于 0 | 待验证 |
+| 上传 DOCX 知识文档 | 文档保存成功，后端从 `word/document.xml` 抽取段落并写入条款表 | 待验证 |
+| 上传 DOC 知识文档 | 文档保存成功，列表显示 `未抽取`，不写入自动条款 | 待验证 |
+| 编辑文档标题或分类但不换文件 | 知识文档更新成功，已有条款的 `source_title` 和 `category_id` 同步变化 | 待验证 |
+| 替换知识文档文件 | 原条款被重建，新条款数量按新文件内容重新计算 | 待验证 |
+| 查询条款列表 | 管理员调用 `POST /api/admin/knowledge/clauses/list` 返回当前文档有效条款 | 待验证 |
+| 归档知识文档 | 文档从列表移除，关联条款同步归档 | 待验证 |
+
+### 风险说明
+
+- 本轮只建立条款结构化基础，不把条款接入 AI 报告生成；报告引用依据追溯由后续 PR 单独实现。
+- 自动条款切分基于常见编号和段落规则，复杂法规排版仍需要人工复核。
+- DOC 旧二进制格式跨平台解析不稳定，本阶段明确不做自动抽取。
+
 ## 阶段 E 第三轮：知识库真实联调（2026-06-17）
 
 ### 变更范围

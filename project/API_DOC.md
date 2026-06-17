@@ -423,6 +423,7 @@ Authorization: Bearer <access_token>
 | 方法 | URL | 说明 |
 |------|-----|------|
 | POST | `/api/admin/knowledge/list` | 知识库列表 |
+| POST | `/api/admin/knowledge/clauses/list` | 查询某个知识文档的结构化条款 |
 | POST | `/api/admin/knowledge/add` | 上传知识文件 |
 | POST | `/api/admin/knowledge/update` | 更新知识条目 |
 | POST | `/api/admin/knowledge/save` | 更新知识条目并可选替换文件 |
@@ -451,6 +452,7 @@ Authorization: Bearer <access_token>
 | 接口 | 请求参数 | 前端说明 |
 |---|---|---|
 | `POST /api/admin/knowledge/list` | 无业务参数 | 页面初始化加载文档列表 |
+| `POST /api/admin/knowledge/clauses/list` | `knowledge_id` 或 `id` | 管理员检查某个文档的条款抽取结果 |
 | `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`file` | 新增必须上传文件 |
 | `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id` | 编辑但不更换文件 |
 | `POST /api/admin/knowledge/save` | Multipart：`id`、`title`、`description`、`category_id`、可选 `file` | 编辑并替换文件时使用 |
@@ -465,8 +467,14 @@ Authorization: Bearer <access_token>
 
 - 仅允许上传 `PDF`、`DOC`、`DOCX`，单文件大小不超过 `20MB`
 - 知识文档统一存放到 `uploads/knowledge/` 子目录，数据库保存相对路径
+- PDF 使用 `pdf-parse` 抽取文本，DOCX 使用 `jszip` 读取 `word/document.xml` 抽取文本
+- DOC 旧二进制格式暂不自动抽取条款，仅保留文件级管理，列表返回 `parse_status = skipped`
+- 自动抽取的条款写入 `knowledge_clauses`，单文档最多自动保留 300 条，单条内容最多保留 4000 字符
+- `knowledge.parse_status` 记录抽取状态：`pending`、`parsed`、`skipped`、`failed`
+- `knowledge.parse_message` 记录跳过原因或失败原因，便于管理员复核
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
+- 本轮仅完成条款结构化入库和检查接口，不改变 AI 分析与报告引用流程；报告依据追溯由后续 PR 接入
 
 知识列表页面需要的返回字段：
 
@@ -481,9 +489,35 @@ Authorization: Bearer <access_token>
   "file_name": "1718527000000-123456789.pdf",
   "file_type": "PDF",
   "file_size": 245760,
+  "clause_count": 26,
+  "parse_status": "parsed",
+  "parse_message": "",
   "status": "active",
   "created_at": "2026-06-09T09:20:00.000Z",
   "updated_at": "2026-06-17T10:00:00.000Z"
+}
+```
+
+条款列表返回字段示例：
+
+```json
+{
+  "code": 0,
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "knowledge_id": 10,
+      "category_id": 2,
+      "source_title": "中华人民共和国安全生产法",
+      "source_code": null,
+      "clause_no": "第三十六条",
+      "content": "生产经营单位应当...",
+      "keywords": "生产经营,单位应当",
+      "sort": 1,
+      "status": "active"
+    }
+  ]
 }
 ```
 
