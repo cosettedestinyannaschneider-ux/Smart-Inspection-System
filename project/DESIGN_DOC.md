@@ -59,7 +59,7 @@
 
 ### 3.3 数据层（MySQL + 本地文件）
 
-- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/knowledge_categories/knowledge/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge_clauses` 用于保存自动抽取的法规条款，为后续报告依据追溯提供结构化基础。
+- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/inspection_report_knowledge_refs/knowledge_categories/knowledge/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge_clauses` 用于保存自动抽取的法规条款，`inspection_report_knowledge_refs` 用于保存报告生成时命中的依据快照。
 - **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`、`uploads/report-templates/`；隐患图片、报告文件和报告模板均通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
@@ -146,9 +146,10 @@ pages/
 3. 勾选多张图片 + 输入文字描述（可选）
 4. 关闭弹窗 → 返回对话框
 5. 点击"发送" → 后端同步执行：
-   a. 豆包识图 → 提取隐患类型/描述/关键词
+   a. 读取图片、企业信息、图片标签和用户描述
    b. 关键词检索知识库（MySQL LIKE 匹配 knowledge_clauses）
-   c. 组合企业信息 + 识别结果 + 法规条款 → 生成分析 JSON
+   c. 组合企业信息 + 图片输入 + 命中法规条款 → 生成分析 JSON
+   d. 生成 Word/PDF 报告，并把命中条款快照写入 inspection_report_knowledge_refs
 6. 前端展示阶段状态：正在识图 → 正在检索 → 正在生成分析 → 完成
 7. 用户可编辑/保存分析结果
 8. 点击生成报告 → Word + PDF 下载
@@ -176,7 +177,7 @@ pages/
 3. 识别条款格式 → 拆分条款存入 knowledge_clauses 表
 4. 无法识别明确条款编号时 → 按段落降级入库；无法抽取文本时保留知识文档并标记为待人工复核
 5. 管理员可查看条款数量和解析状态，可编辑/归档/批量操作知识文档
-6. 本阶段不改变 AI 分析流程，报告引用依据追溯将在后续 PR 从 knowledge_clauses 接入
+6. AI 隐患分析会基于用户描述、企业信息、图片标签和文件名检索本地条款；命中条款只作为受控上下文提供给模型，报告保存后同步保存引用快照
 ```
 
 ## 8. 接口规范

@@ -150,6 +150,23 @@
                          </view>
                        </view>
                      </view>
+                    <view v-if="getDisplayKnowledgeRefs(msg).length || parseStructuredData(msg.content).reference_standards.length" class="reference-panel">
+                      <view class="reference-header">
+                        <text class="reference-title">引用依据</text>
+                        <text class="reference-subtitle">{{ getDisplayKnowledgeRefs(msg).length ? '来自本地知识库命中条款' : '来自 AI 返回的待复核依据' }}</text>
+                      </view>
+                      <view v-for="(ref, refIndex) in getDisplayKnowledgeRefs(msg)" :key="'knowledge-ref-' + refIndex" class="reference-item">
+                        <text class="reference-name">{{ formatKnowledgeRefTitle(ref) }}</text>
+                        <text class="reference-content">{{ ref.content || '条款内容为空' }}</text>
+                        <text v-if="ref.match_keyword" class="reference-keyword">命中关键词：{{ ref.match_keyword }}</text>
+                      </view>
+                      <view v-if="!getDisplayKnowledgeRefs(msg).length">
+                        <view v-for="(ref, refIndex) in parseStructuredData(msg.content).reference_standards" :key="'standard-ref-' + refIndex" class="reference-item weak">
+                          <text class="reference-name">{{ formatReferenceStandardTitle(ref) }}</text>
+                          <text class="reference-content">{{ ref.content || '需人工复核具体条款' }}</text>
+                        </view>
+                      </view>
+                    </view>
                     <view class="struct-actions">
                       <button class="mini-btn edit-btn" @click="startEditResult(msg)">编辑修改</button>
                     </view>
@@ -578,6 +595,39 @@ const formatDateTime = (value) => {
   return text.length > 16 ? text.slice(0, 16) : text
 }
 
+/** 将后端返回的引用依据归一化，兼容下划线字段和 AI 返回字段 */
+const normalizeKnowledgeRefs = (refs) => {
+  if (!Array.isArray(refs)) return []
+  return refs
+    .map((ref) => ({
+      source_title: ref.source_title || ref.name || ref.title || '',
+      source_code: ref.source_code || ref.code || '',
+      clause_no: ref.clause_no || ref.clause || '',
+      content: ref.content || ref.text || '',
+      match_keyword: ref.match_keyword || '',
+    }))
+    .filter((ref) => ref.source_title || ref.source_code || ref.clause_no || ref.content)
+}
+
+/** 格式化本地知识库引用标题 */
+const formatKnowledgeRefTitle = (ref) => {
+  const title = ref?.source_title ? `《${ref.source_title}》` : '未命名依据'
+  const code = ref?.source_code ? `（${ref.source_code}）` : ''
+  const clause = ref?.clause_no ? `${ref.clause_no}` : ''
+  return `${title}${code}${clause}`
+}
+
+/** 格式化 AI JSON 中的 reference_standards 标题 */
+const formatReferenceStandardTitle = (ref) => {
+  const name = ref?.name ? `《${ref.name}》` : '待复核依据'
+  const code = ref?.code ? `（${ref.code}）` : ''
+  const clause = ref?.clause ? `${ref.clause}` : ''
+  return `${name}${code}${clause}`
+}
+
+/** 获取当前消息可展示的引用依据，优先使用后端保存的本地知识库快照 */
+const getDisplayKnowledgeRefs = (msg) => normalizeKnowledgeRefs(msg?.knowledgeRefs || msg?.knowledge_refs || [])
+
 // 尝试解析结构化数据 (9.6 智能隐患分析模块)
 const parseStructuredData = (content) => {
   if (!content) return null
@@ -599,7 +649,9 @@ const parseStructuredData = (content) => {
       if (Array.isArray(data.items)) {
         return {
           mode: 'multi',
-          items: data.items
+          items: data.items,
+          reference_standards: Array.isArray(data.reference_standards) ? data.reference_standards : [],
+          comprehensive_opinion: data.comprehensive_opinion || null,
         }
       }
       if (data.hazard_description) {
@@ -607,7 +659,9 @@ const parseStructuredData = (content) => {
           mode: 'single',
           hazard_description: data.hazard_description,
           basis: data.basis || '',
-          suggestion: data.suggestion || ''
+          suggestion: data.suggestion || '',
+          reference_standards: Array.isArray(data.reference_standards) ? data.reference_standards : [],
+          comprehensive_opinion: data.comprehensive_opinion || null,
         }
       }
     }
@@ -636,9 +690,20 @@ const cancelEditResult = (msg) => {
 const saveEditResult = (msg) => {
   if (!msg.id) return uni.showToast({ title: '无法保存，缺少记录ID', icon: 'none' })
   savingResult.value = true
+  const originalData = parseStructuredData(msg.content) || {}
   const payload = msg.editData?.mode === 'multi'
-    ? { items: msg.editData.items }
-    : { hazard_description: msg.editData.hazard_description, basis: msg.editData.basis, suggestion: msg.editData.suggestion }
+    ? {
+        items: msg.editData.items,
+        reference_standards: originalData.reference_standards || [],
+        comprehensive_opinion: originalData.comprehensive_opinion || null,
+      }
+    : {
+        hazard_description: msg.editData.hazard_description,
+        basis: msg.editData.basis,
+        suggestion: msg.editData.suggestion,
+        reference_standards: originalData.reference_standards || [],
+        comprehensive_opinion: originalData.comprehensive_opinion || null,
+      }
   const newContent = JSON.stringify(payload, null, 2)
   request({
     url: apiUrl('/api/history/update-result'),
@@ -946,6 +1011,7 @@ const loadSession = (sessionId) => {
             content: item.result,
             wordPath: item.wordPath || item.word_path,
             pdfPath: item.pdfPath || item.pdf_path,
+            knowledgeRefs: normalizeKnowledgeRefs(item.knowledge_refs),
             isEditing: false,
             editData: null
           }
@@ -1099,6 +1165,7 @@ const handleResponse = (data) => {
       content: data.result,
       wordPath: data.wordPath,
       pdfPath: data.pdfPath,
+      knowledgeRefs: normalizeKnowledgeRefs(data.knowledge_refs),
       isEditing: false,
       editData: null
     }
@@ -2478,6 +2545,73 @@ const goToAdmin = () => {
   word-break: break-word;
 }
 
+.reference-panel {
+  margin: 0 14px 14px;
+  padding: 12px 14px;
+  border: 1px solid #e4e9f1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reference-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.reference-title {
+  color: #202123;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.reference-subtitle {
+  color: #7c8798;
+  font-size: 11px;
+}
+
+.reference-item {
+  padding: 10px 0;
+  border-top: 1px solid #e6ebf2;
+}
+
+.reference-item:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.reference-item.weak {
+  color: #697386;
+}
+
+.reference-name {
+  display: block;
+  color: #2d3b50;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.reference-content,
+.reference-keyword {
+  display: block;
+  margin-top: 5px;
+  color: #526078;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.reference-keyword {
+  color: #7c8798;
+  font-size: 11px;
+}
+
 .struct-textarea {
   width: 100%;
   height: 112px;
@@ -2737,6 +2871,14 @@ const goToAdmin = () => {
   .struct-section,
   .struct-card {
     padding: 10px;
+  }
+  .reference-panel {
+    margin: 0 10px 10px;
+  }
+  .reference-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
   .struct-textarea {
     height: 128px;

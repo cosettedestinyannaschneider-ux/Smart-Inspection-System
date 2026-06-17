@@ -256,14 +256,31 @@ const enterpriseDal = {
 
       /** 关联报告列表（含下载路径） */
       const [reports] = await db.execute(
-        `SELECT id, title, created_at, word_path, pdf_path
-         FROM inspection_reports
+        `SELECT
+           ir.id, ir.title, ir.created_at, ir.word_path, ir.pdf_path,
+           COUNT(irk.id) AS knowledge_ref_count
+         FROM inspection_reports ir
+         LEFT JOIN inspection_report_knowledge_refs irk ON irk.report_id = ir.id
          WHERE enterprise_id = ? AND word_path IS NOT NULL
-         ORDER BY created_at DESC
+         GROUP BY ir.id, ir.title, ir.created_at, ir.word_path, ir.pdf_path
+         ORDER BY ir.created_at DESC
          LIMIT 20`,
         [row.id]
       )
       row.reports = reports
+
+      /** 每份报告展示前 3 条依据摘要，便于管理员从企业档案回查依据来源 */
+      for (const report of row.reports) {
+        const [refs] = await db.execute(
+          `SELECT source_title, source_code, clause_no, content, match_keyword
+           FROM inspection_report_knowledge_refs
+           WHERE report_id = ?
+           ORDER BY sort ASC, id ASC
+           LIMIT 3`,
+          [report.id]
+        )
+        report.knowledge_refs = refs
+      }
 
       /** 根据隐患统计计算风险等级 */
       if (row.hazard_count === 0) {

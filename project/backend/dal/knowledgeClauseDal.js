@@ -114,6 +114,57 @@ const knowledgeClauseDal = {
     )
     return rows
   },
+
+  /**
+   * 按关键词检索可用于报告引用的本地知识条款。
+   * 当前阶段采用 MySQL LIKE 检索，避免引入向量库或复杂 RAG 链路。
+   */
+  async searchActiveByKeywords(keywords = [], limit = 8) {
+    const cleanedKeywords = Array.from(new Set(
+      keywords
+        .map((item) => String(item || '').trim())
+        .filter((item) => item.length >= 2)
+    )).slice(0, 12)
+
+    if (!cleanedKeywords.length) return []
+
+    const whereParts = []
+    const params = []
+    cleanedKeywords.forEach((keyword) => {
+      const likeValue = `%${keyword}%`
+      whereParts.push(`(
+        source_title LIKE ?
+        OR source_code LIKE ?
+        OR clause_no LIKE ?
+        OR content LIKE ?
+        OR keywords LIKE ?
+      )`)
+      params.push(likeValue, likeValue, likeValue, likeValue, likeValue)
+    })
+
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 8, 20))
+    const [rows] = await db.execute(
+      `SELECT id, knowledge_id, category_id, source_title, source_code, clause_no, content, keywords, sort
+       FROM knowledge_clauses
+       WHERE status = 'active'
+         AND (${whereParts.join(' OR ')})
+       ORDER BY sort ASC, id ASC
+       LIMIT ${safeLimit}`,
+      params
+    )
+
+    return rows.map((row) => {
+      const haystack = [
+        row.source_title,
+        row.source_code,
+        row.clause_no,
+        row.content,
+        row.keywords,
+      ].join(' ')
+      const matchKeyword = cleanedKeywords.find((keyword) => haystack.includes(keyword)) || cleanedKeywords[0] || null
+      return { ...row, match_keyword: matchKeyword }
+    })
+  },
 }
 
 module.exports = knowledgeClauseDal
