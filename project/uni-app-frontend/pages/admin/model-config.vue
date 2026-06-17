@@ -6,7 +6,7 @@
         <text class="heading-title">AI 模型配置</text>
         <text class="heading-description">管理大模型接口、调用参数和当前启用配置</text>
       </view>
-      <view class="model-page-actions"><view class="primary-btn" @click="openAdd">＋ 添加模型</view></view>
+      <view class="model-page-actions"><view class="primary-btn" @click="openAdd">添加模型</view></view>
     </view>
 
     <!-- 模型配置概览 -->
@@ -27,7 +27,7 @@
 
     <!-- 当前启用模型 -->
     <view v-if="activeModel" class="active-panel">
-      <view class="active-icon">◇</view>
+      <view class="active-icon">AI</view>
       <view class="active-content">
         <view class="active-title-row">
           <text class="active-title">{{ activeModel.name }}</text>
@@ -43,7 +43,7 @@
       </view>
     </view>
     <view v-else-if="envDefault?.available" class="active-panel env-active-panel">
-      <view class="active-icon">◇</view>
+      <view class="active-icon">ENV</view>
       <view class="active-content">
         <view class="active-title-row">
           <text class="active-title">{{ envDefault.name }}</text>
@@ -80,21 +80,28 @@
       <text class="section-title">全部配置</text>
       <text class="section-description">API Key 仅展示脱敏内容；可手动检测接口连通性</text>
     </view>
+    <view class="check-guide">
+      <text>检测会由后端使用已保存的脱敏配置发起一次最小请求，只返回可读状态，不向前端暴露 API Key 或模型原始响应。</text>
+    </view>
     <view class="model-grid">
       <view v-for="model in list" :key="model.id" class="model-card" :class="{ active: model.is_active }">
         <view class="model-card-head">
-          <view class="provider-icon" :class="model.is_active ? 'provider-active' : ''">◇</view>
+          <view class="provider-icon" :class="model.is_active ? 'provider-active' : ''">{{ getProviderShortName(model.provider) }}</view>
           <view class="model-title-copy">
             <text class="model-name">{{ model.name }}</text>
             <text class="provider-name">{{ model.provider }}</text>
           </view>
-          <text v-if="model.is_active" class="mini-active-tag">已启用</text>
+          <view class="model-card-tags">
+            <text v-if="model.is_active" class="mini-active-tag">已启用</text>
+            <text class="check-tag" :class="getCheckClass(model)">{{ getCheckLabel(model) }}</text>
+          </view>
         </view>
         <view class="model-detail"><text class="detail-label">模型 ID</text><text class="detail-value">{{ model.model_name }}</text></view>
         <view class="model-detail"><text class="detail-label">API Key</text><text class="detail-value">{{ model.api_key_masked }}</text></view>
         <view class="model-detail"><text class="detail-label">接口地址</text><text class="detail-value address-value">{{ model.base_url }}</text></view>
         <view v-if="modelCheckState[model.id]" class="check-result" :class="{ ok: modelCheckState[model.id].ok, failed: !modelCheckState[model.id].ok }">
-          {{ modelCheckState[model.id].message }}
+          <text>{{ modelCheckState[model.id].message }}</text>
+          <text v-if="modelCheckState[model.id].checkedAt" class="check-time">检测时间：{{ modelCheckState[model.id].checkedAt }}</text>
         </view>
         <view class="model-actions">
           <text v-if="!model.is_active" class="action-link success-link" @click="activate(model)">启用</text>
@@ -332,18 +339,54 @@ const testModel = async (model) => {
       [model.id]: {
         ok: !!result.ok,
         message: result.message || (result.ok ? '模型接口连通正常' : '模型接口检测失败'),
+        checkedAt: formatCheckTime(result.checked_at),
       },
     }
     uni.showToast({ title: result.ok ? '检测通过' : '检测异常', icon: result.ok ? 'success' : 'none' })
   } catch (error) {
     modelCheckState.value = {
       ...modelCheckState.value,
-      [model.id]: { ok: false, message: error?.message || '模型接口检测失败' },
+      [model.id]: { ok: false, message: error?.message || '模型接口检测失败', checkedAt: formatCheckTime() },
     }
     uni.showToast({ title: '检测失败', icon: 'none' })
   } finally {
     checkingModelId.value = null
   }
+}
+
+/** 服务商短名用于色块头像，避免管理页过度依赖抽象符号 */
+const getProviderShortName = (provider) => {
+  const text = String(provider || 'AI').trim()
+  if (!text) return 'AI'
+  if (/deepseek/i.test(text)) return 'DS'
+  if (/openai/i.test(text)) return 'OA'
+  if (/豆包|doubao|volc/i.test(text)) return '豆包'
+  if (/千问|qwen|aliyun/i.test(text)) return '千问'
+  return text.slice(0, 2).toUpperCase()
+}
+
+/** 获取模型检测状态标签 */
+const getCheckLabel = (model) => {
+  if (checkingModelId.value === model.id) return '检测中'
+  const state = modelCheckState.value[model.id]
+  if (!state) return '未检测'
+  return state.ok ? '可用' : '异常'
+}
+
+/** 获取模型检测状态样式 */
+const getCheckClass = (model) => {
+  if (checkingModelId.value === model.id) return 'checking'
+  const state = modelCheckState.value[model.id]
+  if (!state) return 'pending'
+  return state.ok ? 'ok' : 'failed'
+}
+
+/** 格式化检测时间，后端时间为空时使用当前本地时间 */
+const formatCheckTime = (value = null) => {
+  const date = value ? new Date(value) : new Date()
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (num) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 </script>
 
@@ -362,24 +405,32 @@ const testModel = async (model) => {
 .summary-label { margin-top: 6px; color: #8b98aa; font-size: 12px; }
 .active-panel { margin-bottom: 26px; padding: 22px; display: flex; align-items: center; gap: 18px; background: linear-gradient(135deg,#1677ff,#4f9cff); border-radius: 16px; color: #fff; box-shadow: 0 10px 25px rgba(22,119,255,.2); }
 .env-active-panel { background: linear-gradient(135deg,#465668,#6d7d90); box-shadow: 0 10px 25px rgba(70,86,104,.18); }
-.active-icon { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 15px; background: rgba(255,255,255,.18); font-size: 28px; }
+.active-icon { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 15px; background: rgba(255,255,255,.18); font-size: 14px; font-weight: 700; }
 .active-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }.active-title-row { display: flex; align-items: center; gap: 10px; }
 .active-title { font-size: 19px; font-weight: 700; }.active-tag { padding: 3px 9px; border-radius: 20px; background: rgba(255,255,255,.2); font-size: 11px; }
 .active-model-id { margin-top: 6px; font-size: 13px; }.active-address { margin-top: 3px; color: rgba(255,255,255,.75); font-size: 11px; }
 .active-params { display: flex; gap: 22px; }.param-item { display: flex; flex-direction: column; align-items: center; }.param-value { font-size: 18px; font-weight: 700; }.param-label { margin-top: 4px; color: rgba(255,255,255,.75); font-size: 10px; }
-.section-heading { margin-bottom: 14px; display: flex; justify-content: space-between; }.section-title { color: #24334e; font-size: 17px; font-weight: 700; }.section-description { color: #96a2b3; font-size: 12px; }
+.section-heading { margin-bottom: 10px; display: flex; justify-content: space-between; }.section-title { color: #24334e; font-size: 17px; font-weight: 700; }.section-description { color: #96a2b3; font-size: 12px; }
+.check-guide { margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; background: #f7fafc; border: 1px solid #e7edf5; color: #69778c; font-size: 12px; line-height: 1.6; }
 .env-default-card { margin-bottom: 20px; padding: 18px; background: #fff; border: 1px dashed #c8d2df; border-radius: 14px; }
 .env-icon { width: 46px; color: #526078; font-size: 11px; font-weight: 700; background: #edf2f7; }
 .env-disabled { color: #d77b16; }
 .env-note { margin-top: 12px; padding: 9px 11px; border-radius: 8px; background: #f7f9fc; color: #69778c; font-size: 11px; line-height: 1.5; }
 .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.model-card { padding: 18px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.model-card.active { border-color: #a9ceff; }
-.model-card-head { margin-bottom: 16px; display: flex; align-items: center; }.provider-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 11px; background: #f1ebff; color: #7650e8; font-size: 21px; }.provider-active { background: #eaf3ff; color: #1677ff; }
+.model-card-head { margin-bottom: 16px; display: flex; align-items: center; }.provider-icon { width: 44px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 11px; background: #f1ebff; color: #7650e8; font-size: 11px; font-weight: 700; }.provider-active { background: #eaf3ff; color: #1677ff; }
 .model-title-copy { flex: 1; margin-left: 11px; display: flex; flex-direction: column; }.model-name { color: #22314c; font-size: 14px; font-weight: 700; }.provider-name { margin-top: 3px; color: #96a2b3; font-size: 11px; }.mini-active-tag { color: #18a66c; font-size: 11px; }
+.model-card-tags { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; }
+.check-tag { padding: 3px 8px; border-radius: 999px; font-size: 10px; }
+.check-tag.pending { background: #f2f5f8; color: #69778c; }
+.check-tag.checking { background: #eef5ff; color: #1677ff; }
+.check-tag.ok { background: #eaf8f1; color: #168a57; }
+.check-tag.failed { background: #fff4e8; color: #b76a00; }
 .model-detail { margin-top: 9px; display: flex; justify-content: space-between; gap: 12px; }.detail-label { flex-shrink: 0; color: #9aa6b7; font-size: 11px; }.detail-value { color: #59677d; font-size: 11px; text-align: right; }.address-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-actions { margin-top: 16px; padding-top: 13px; display: flex; justify-content: flex-end; gap: 15px; border-top: 1px solid #edf1f7; }.action-link { color: #1677ff; font-size: 12px; }.success-link { color: #18a66c; }.dangerous { color: #f05252; }
-.check-result { margin-top: 12px; padding: 9px 11px; border-radius: 8px; font-size: 11px; line-height: 1.5; }
+.check-result { margin-top: 12px; padding: 9px 11px; border-radius: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; line-height: 1.5; }
 .check-result.ok { background: #eaf8f1; color: #168a57; }
 .check-result.failed { background: #fff4e8; color: #b76a00; }
+.check-time { color: #8b98aa; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }.form-item.full { grid-column: 1 / -1; }.form-label { display: block; margin-bottom: 8px; color: #536179; font-size: 13px; font-weight: 600; }.form-input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f9fbfd; box-sizing: border-box; font-size: 13px; }.password-wrap { position: relative; }.password-input { padding-right: 60px; }.password-toggle { position: absolute; right: 12px; top: 13px; color: #1677ff; font-size: 12px; }
 /* 模型配置弹窗 */
 .modal-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 5000; padding: 24px; display: flex; align-items: center; justify-content: center; background: rgba(15,28,50,.46); box-sizing: border-box; }.modal-panel { width: 760px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 18px; }.modal-header { padding: 22px 26px; display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #edf1f7; }.modal-title { display: block; color: #172541; font-size: 21px; font-weight: 700; }.modal-description { display: block; margin-top: 5px; color: #909daf; font-size: 13px; }.modal-close { color: #91a0b5; font-size: 26px; line-height: 1; }.modal-body { flex: 1; max-height: 66vh; padding: 24px 26px; box-sizing: border-box; }.modal-footer { padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #edf1f7; }
@@ -389,7 +440,7 @@ const testModel = async (model) => {
   .primary-btn,.secondary-btn,.save-btn { height: 70rpx; padding: 0 22rpx; border-radius: 13rpx; font-size: 24rpx; }
   .summary-grid { grid-template-columns: 1fr 1fr; gap: 14rpx; }.active-summary { grid-column: 1 / -1; }.summary-card { padding: 22rpx; border-radius: 18rpx; }.summary-value { font-size: 34rpx; }.summary-value.active-name { font-size: 28rpx; }.summary-label { font-size: 21rpx; }
   .active-panel { padding: 24rpx; display: block; border-radius: 22rpx; }.active-icon { width: 66rpx; height: 66rpx; border-radius: 18rpx; font-size: 34rpx; }.active-content { margin-top: 18rpx; }.active-title { font-size: 30rpx; }.active-tag { font-size: 20rpx; }.active-model-id { font-size: 23rpx; }.active-address { font-size: 20rpx; }.active-params { margin-top: 22rpx; justify-content: space-around; }.param-value { font-size: 29rpx; }.param-label { font-size: 19rpx; }
-  .section-title { font-size: 29rpx; }.section-description { font-size: 21rpx; }.model-grid { grid-template-columns: 1fr; gap: 18rpx; }.model-card { padding: 26rpx; border-radius: 20rpx; }.provider-icon { width: 66rpx; height: 66rpx; border-radius: 17rpx; font-size: 34rpx; }.model-name { font-size: 27rpx; }.provider-name,.mini-active-tag,.detail-label,.detail-value,.action-link { font-size: 21rpx; }.model-actions { gap: 26rpx; }
+  .section-title { font-size: 29rpx; }.section-description { font-size: 21rpx; }.check-guide { font-size: 21rpx; }.model-grid { grid-template-columns: 1fr; gap: 18rpx; }.model-card { padding: 26rpx; border-radius: 20rpx; }.provider-icon { width: 74rpx; height: 66rpx; border-radius: 17rpx; font-size: 20rpx; }.model-name { font-size: 27rpx; }.provider-name,.mini-active-tag,.detail-label,.detail-value,.action-link { font-size: 21rpx; }.check-tag { font-size: 19rpx; }.model-actions { gap: 26rpx; }
   .env-default-card { margin-bottom: 22rpx; padding: 26rpx; border-radius: 20rpx; }.env-icon { width: 74rpx; font-size: 19rpx; }.env-note { font-size: 20rpx; }
   .check-result { font-size: 21rpx; }
   .form-grid { grid-template-columns: 1fr; gap: 24rpx; }.form-label { font-size: 25rpx; }.form-input { height: 78rpx; padding: 0 20rpx; border-radius: 13rpx; font-size: 25rpx; }.password-toggle { right: 20rpx; top: 25rpx; font-size: 22rpx; }

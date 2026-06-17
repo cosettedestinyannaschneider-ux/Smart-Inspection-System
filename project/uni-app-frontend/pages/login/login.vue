@@ -2,13 +2,18 @@
   <view class="container login-container">
     <view class="login-shell">
       <view class="brand-panel">
-        <text class="brand-mark">智检</text>
+        <view class="brand-mark">智检</view>
         <text class="brand-title">安全生产社会化服务智检系统</text>
         <text class="brand-copy">企业档案、隐患图片、AI 分析和报告生成统一入口</text>
+        <view class="brand-points">
+          <text>检查员工作台</text>
+          <text>管理员后台</text>
+          <text>报告生成</text>
+        </view>
       </view>
       <view class="card login-card">
         <view class="login-heading">
-          <view class="brand-logo">◇</view>
+          <view class="brand-logo">智</view>
           <view>
             <text class="brand-name">登录系统</text>
             <text class="brand-slogan">使用分配的检查员或管理员账号进入</text>
@@ -35,6 +40,9 @@
           <view class="login-tip">
             <text>连接不上？</text>
             <text class="link-text" @click="goToSettings">服务器设置</text>
+          </view>
+          <view class="security-note">
+            <text>数据库密码和模型 API Key 均由本地环境配置或后端加密保存，不会在页面明文展示。</text>
           </view>
         </view>
       </view>
@@ -115,46 +123,47 @@ const goToSettings = () => {
   align-items: center;
   min-height: 100vh;
   padding: 32px;
-  background: #eef2f7;
+  background: #f3f6fa;
   box-sizing: border-box;
 }
 .login-shell {
   width: 100%;
-  max-width: 920px;
+  max-width: 960px;
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: minmax(0, 1fr) 420px;
   align-items: stretch;
   overflow: hidden;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(15, 28, 50, .08);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(15, 28, 50, .08);
 }
 .brand-panel {
   padding: 52px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #162233;
+  background: #182333;
   color: #fff;
 }
 .brand-mark {
-  width: 58px;
-  height: 58px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255,255,255,.22);
+  border: 1px solid rgba(255,255,255,.18);
   border-radius: 12px;
-  background: rgba(255,255,255,.08);
+  background: #1677ff;
   font-size: 17px;
   font-weight: 700;
+  box-sizing: border-box;
 }
 .brand-title {
   display: block;
   margin-top: 26px;
   max-width: 360px;
-  font-size: 30px;
+  font-size: 29px;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -166,10 +175,23 @@ const goToSettings = () => {
   font-size: 14px;
   line-height: 1.8;
 }
+.brand-points {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.brand-points text {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.08);
+  color: #d6e1ee;
+  font-size: 12px;
+}
 .login-card {
   width: auto;
   max-width: none;
-  padding: 44px 36px;
+  padding: 48px 38px;
   text-align: left;
   box-shadow: none;
   border: 0;
@@ -187,9 +209,10 @@ const goToSettings = () => {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: #eaf3ff;
-  color: #1677ff;
-  font-size: 26px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
 }
 .brand-name {
   font-size: 24px;
@@ -209,19 +232,21 @@ const goToSettings = () => {
 }
 .label {
   font-size: 14px;
-  font-weight: bold;
+  font-weight: 700;
   margin-bottom: 10px;
   display: block;
+  color: #39465c;
 }
 .input {
   width: 100%;
-  height: 46px;
-  padding: 0 13px;
+  height: 48px;
+  padding: 0 14px;
   border-radius: 9px;
   background-color: #f8fafc;
   border: 1px solid #dde5ef;
   box-sizing: border-box;
   font-size: 14px;
+  color: #24334e;
 }
 .submit-btn {
   height: 48px;
@@ -258,15 +283,27 @@ const goToSettings = () => {
   color: #1677ff;
   font-weight: bold;
 }
+.security-note {
+  margin-top: 18px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: #f7fafc;
+  border: 1px solid #e7edf5;
+  color: #758398;
+  font-size: 12px;
+  line-height: 1.6;
+}
 @media screen and (max-width: 760px) {
   .login-container {
-    padding: 20px;
+    align-items: stretch;
+    padding: 18px;
   }
   .login-shell {
     display: block;
+    border-radius: 12px;
   }
   .brand-panel {
-    padding: 28px;
+    padding: 26px;
   }
   .brand-title {
     margin-top: 18px;
@@ -276,7 +313,10 @@ const goToSettings = () => {
     font-size: 13px;
   }
   .login-card {
-    padding: 30px 24px;
+    padding: 28px 22px;
+  }
+  .login-heading {
+    margin-bottom: 26px;
   }
 }
 </style>

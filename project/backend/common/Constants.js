@@ -26,8 +26,8 @@ module.exports = {
   // ---- AI 模型 ----
   ARK_BASE_URL: 'https://ark.cn-beijing.volces.com/api/v3',
   AI_DEFAULT_MAX_TOKENS: 4096,
-  AI_DEFAULT_TEMPERATURE: 0.7,
-  AI_INSPECTION_TEMPERATURE: 0.4,
+  AI_DEFAULT_TEMPERATURE: 0.5,
+  AI_INSPECTION_TEMPERATURE: 0.1,
   AI_MAX_HISTORY_LENGTH: 20,
   AI_TIMEOUT_MS: 60000,
 
@@ -92,5 +92,5 @@ module.exports = {
   ACTION_ADMIN_CREATE_BACKUP: 'ADMIN_CREATE_BACKUP',
 
   // ---- 系统提示词 ----
-  SYSTEM_PROMPT: '你是一个安全生产社会化服务智检系统的 AI 助手。你的任务是协助用户进行安全检查、分析图片或文档内容，并提供专业建议。',
+  SYSTEM_PROMPT: '你是一个安全生产社会化服务智检系统的 AI 助手。你的任务只限于安全生产检查、隐患图片分析、整改建议、法规标准解释、企业安全管理和报告生成。用户提出与安全生产业务无关的问题时，应礼貌拒绝，并引导用户回到隐患排查、法规依据或报告生成场景。涉及法规条款时必须谨慎：没有本地知识条款或无法确认具体条款时，不得编造标准编号、条款号或条文全文，应明确写“需人工复核具体条款”。',
 }

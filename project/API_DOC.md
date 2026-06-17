@@ -143,7 +143,7 @@
 - **URL**: `POST /api/enterprise/update`
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `enterprise:manage`
-- **参数**: `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `inspector_name`, `inspection_date`, `project_name`
+- **参数**: `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `production_process`, `inspector_name`, `inspection_date`, `project_name`
 
 ---
 
@@ -157,6 +157,10 @@
 - **参数**: `prompt` (String), `session_id` (String, 可选), `model_id` (Number, 可选), `file` (File, 可选)
 - **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
 
+> 业务范围：纯文本请求会进行安全生产业务范围保底判断。与安全检查、隐患分析、整改建议、法规标准、企业安全管理或报告生成无关的问题会返回业务范围提示，不生成 Word/PDF 报告。
+>
+> 模型能力：上传图片或进行隐患图片分析时，需要选择支持视觉/多模态输入的模型。若模型 API Key、API 地址、模型 ID 或图片能力异常，后端返回归一化错误提示，不暴露 API Key、请求头或供应商原始响应。
+
 ### 3.2 多图智能隐患分析
 - **URL**: `POST /api/hazard/analyze`
 - **方法**: `POST` (JSON)
@@ -164,6 +168,10 @@
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选), `model_id` (Number, 可选)
 - **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
+
+> 图片顺序：后端按 `image_ids` 的传入顺序读取图片，并要求 AI 结果中的 `image_id` 与该顺序一致，避免报告中的“图片 1/2/3”与用户选择顺序错位。
+>
+> 法规依据：当前知识库条款结构化已支持管理员上传后的条款管理，但本接口尚未把本地条款检索结果注入 AI 上下文。AI 不能高置信确认具体条款时，应返回“需人工复核具体条款”，避免编造法规编号或条款内容。
 
 ### 3.3 编辑保存分析结果
 - **URL**: `POST /api/history/update-result`

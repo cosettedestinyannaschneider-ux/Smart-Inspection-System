@@ -98,13 +98,13 @@ const enterpriseDal = {
     const [res] = await db.execute(
       `UPDATE enterprises
        SET name = ?, region = ?, address = ?, contact = ?, phone = ?,
-           industry = ?, enterprise_type = ?, scale = ?,
-           inspector_name = ?, inspection_date = ?, project_name = ?
+            industry = ?, enterprise_type = ?, scale = ?,
+            production_process = ?, inspector_name = ?, inspection_date = ?, project_name = ?
        WHERE id = ?`,
       [
         data.name, data.region, data.address, data.contact, data.phone,
         data.industry || null, data.enterprise_type || null, data.scale || null,
-        data.inspector_name || null, data.inspection_date || null,
+        data.production_process || null, data.inspector_name || null, data.inspection_date || null,
         data.project_name || null, enterpriseId
       ]
     )

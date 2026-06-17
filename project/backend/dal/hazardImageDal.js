@@ -46,10 +46,11 @@ const hazardImageDal = {
     if (!validIds.length) return []
     const placeholders = validIds.map(() => '?').join(',')
     const [rows] = await db.execute(
-      `SELECT * FROM hazard_images WHERE user_id = ? AND id IN (${placeholders}) ORDER BY created_at DESC`,
+      `SELECT * FROM hazard_images WHERE user_id = ? AND id IN (${placeholders}) AND status = 'active'`,
       [userId, ...validIds]
     )
-    return rows
+    const orderMap = new Map(validIds.map((id, index) => [id, index]))
+    return rows.sort((a, b) => (orderMap.get(Number(a.id)) ?? 0) - (orderMap.get(Number(b.id)) ?? 0))
   },
 
   async findByEnterpriseId(enterpriseId) {

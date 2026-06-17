@@ -559,8 +559,22 @@ app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.
   try {
     console.log(`[Server] Processing: prompt=${prompt}, sessionId=${session_id}, isInspection=${isInspectionFlag}`)
     const modelId = model_id ? Number(model_id) : null
-    const { result, sessionId } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
+    const { result, sessionId, businessScopeRefusal } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
     console.log(`[Server] AI result length: ${result ? result.length : 0}`)
+
+    if (businessScopeRefusal) {
+      const historyId = await historyDal.createHistory(userId, prompt, result, null, null, null, sessionId, {
+        title: '业务范围提示',
+      })
+      await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, refused: true }, req.ip)
+      return res.success({
+        result,
+        sessionId,
+        id: historyId,
+        wordPath: null,
+        pdfPath: null,
+      })
+    }
 
     const enterprise = await enterpriseDal.findByUserOrganization(userId)
     const wordPath = await docService.generateWord(prompt, result, filePath, { enterprise })
@@ -918,11 +932,14 @@ app.post('/api/enterprise/update', requireAuth, requirePermission('enterprise:ma
     if (!enterprise) {
       return res.fail(ErrorCode.PARAM_INVALID, '当前用户尚未分配所属企业和部门')
     }
-    const { region, address, contact, phone, industry, enterprise_type, scale, inspector_name, inspection_date, project_name } = req.body
+    const {
+      region, address, contact, phone, industry, enterprise_type, scale,
+      production_process, inspector_name, inspection_date, project_name
+    } = req.body
     await enterpriseDal.updateById(enterprise.id, {
       name, region, address, contact, phone,
       industry, enterprise_type, scale,
-      inspector_name, inspection_date,
+      production_process, inspector_name, inspection_date,
       project_name,
     })
     await logDal.logAction(userId, C.ACTION_UPDATE_ENTERPRISE, { name }, req.ip)

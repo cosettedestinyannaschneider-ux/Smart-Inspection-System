@@ -1,33 +1,41 @@
 <template>
   <AdminShell active-key="logs" title="操作日志" wide @ready="handleAdminReady">
-    <view class="page-heading"><view><text class="heading-title">操作日志</text><text class="heading-desc">查看系统关键操作与访问记录</text></view><view class="refresh-btn" @click="fetchList">刷新日志</view></view>
+    <view class="page-heading">
+      <view>
+        <text class="heading-title">操作日志</text>
+        <text class="heading-desc">查看系统关键操作与访问记录</text>
+      </view>
+      <view class="refresh-btn" @click="fetchList">刷新日志</view>
+    </view>
     <view class="summary-grid">
       <view class="summary-card"><text class="summary-value">{{ list.length }}</text><text class="summary-label">日志总数</text></view>
       <view class="summary-card"><text class="summary-value green">{{ todayCount }}</text><text class="summary-label">今日日志</text></view>
       <view class="summary-card"><text class="summary-value purple">{{ adminCount }}</text><text class="summary-label">管理员操作</text></view>
+      <view class="summary-card"><text class="summary-value dark">{{ recentHourCount }}</text><text class="summary-label">近一小时</text></view>
     </view>
     <view class="filter-panel">
-      <view class="search-box"><text class="search-icon">⌕</text><input v-model="keyword" class="search-input" placeholder="搜索用户、操作或详情" /></view>
-      <picker :range="moduleOptions" @change="changeModule"><view class="filter-picker">{{ activeModule }}⌄</view></picker>
+      <view class="search-box"><input v-model="keyword" class="search-input" placeholder="搜索用户、操作或详情" /></view>
+      <picker :range="moduleOptions" @change="changeModule"><view class="filter-picker">{{ activeModule }}</view></picker>
       <view class="clear-btn" @click="clearFilters">清空筛选</view>
     </view>
     <view v-if="filteredList.length === 0" class="empty-card">暂无符合条件的操作日志</view>
-    <view v-else class="log-table">
-      <view class="log-table-head">
-        <text>时间</text>
-        <text>用户</text>
-        <text>模块</text>
-        <text>操作</text>
-        <text>详情</text>
-        <text>IP</text>
-      </view>
-      <view v-for="log in filteredList" :key="log.id" class="log-row">
-        <text class="log-time">{{ log.created_at }}</text>
-        <text class="log-user-cell">{{ log.username }} · {{ log.role }}</text>
-        <text class="module-tag">{{ log.module }}</text>
-        <text class="log-action">{{ log.action }}</text>
-        <text class="log-detail">{{ log.details || '暂无操作详情' }}</text>
-        <text class="log-ip">{{ log.ip_address || '-' }}</text>
+    <view v-else class="log-list">
+      <view v-for="log in filteredList" :key="log.id" class="log-card">
+        <view class="log-main">
+          <view class="log-avatar">{{ getUserInitial(log.username) }}</view>
+          <view class="log-copy">
+            <view class="log-title-row">
+              <text class="log-action">{{ log.action }}</text>
+              <text class="module-tag">{{ log.module || '系统' }}</text>
+            </view>
+            <text class="log-detail">{{ log.details || '暂无操作详情' }}</text>
+          </view>
+        </view>
+        <view class="log-meta">
+          <text>{{ log.username || '未知用户' }} · {{ log.role || '-' }}</text>
+          <text>{{ log.created_at || '-' }}</text>
+          <text>IP {{ log.ip_address || '-' }}</text>
+        </view>
       </view>
     </view>
   </AdminShell>
@@ -80,6 +88,14 @@ const todayCount = computed(() => {
 })
 /** 管理员操作日志数量 */
 const adminCount = computed(() => list.value.filter(item => item.role === '管理员').length)
+/** 最近一小时操作日志数量，用于判断后台当前活跃度 */
+const recentHourCount = computed(() => {
+  const threshold = Date.now() - 60 * 60 * 1000
+  return list.value.filter((item) => {
+    const time = new Date(String(item.created_at || '').replace(/-/g, '/')).getTime()
+    return Number.isFinite(time) && time >= threshold
+  }).length
+})
 /** 根据关键词和模块筛选日志 */
 const filteredList = computed(() => {
   const text = keyword.value.trim().toLowerCase()
@@ -110,16 +126,43 @@ const fetchList = async () => {
 const changeModule = (event) => { activeModule.value = moduleOptions.value[event.detail.value] || '全部模块' }
 /** 清空全部筛选条件 */
 const clearFilters = () => { keyword.value = ''; activeModule.value = '全部模块' }
+/** 生成日志用户头像文字 */
+const getUserInitial = (username) => String(username || '用').slice(0, 1).toUpperCase()
 </script>
 
 <style scoped>
-.page-heading { margin-bottom: 22px; display: flex; align-items: center; justify-content: space-between; }.heading-title { display: block; color: #172541; font-size: 28px; font-weight: 700; }.heading-desc { display: block; margin-top: 6px; color: #8b98aa; font-size: 14px; }.refresh-btn,.clear-btn { height: 40px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; }.refresh-btn { background: #1677ff; color: #fff; }.clear-btn { background: #f1f4f8; color: #69778c; }
-.summary-grid { margin-bottom: 18px; display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }.summary-card { padding: 18px 20px; display: flex; flex-direction: column; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.summary-value { color: #1677ff; font-size: 25px; font-weight: 700; }.summary-value.green { color: #18a66c; }.summary-value.purple { color: #7650e8; }.summary-label { margin-top: 5px; color: #8b98aa; font-size: 12px; }
-.filter-panel { margin-bottom: 16px; padding: 14px; display: flex; gap: 12px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.search-box { flex: 1; height: 40px; padding: 0 12px; display: flex; align-items: center; background: #f7f9fc; border-radius: 9px; }.search-icon { margin-right: 8px; color: #8f9bad; }.search-input { flex: 1; font-size: 13px; }.filter-picker { height: 40px; min-width: 120px; padding: 0 14px; display: flex; align-items: center; border: 1px solid #e2e9f2; border-radius: 9px; color: #59677d; font-size: 12px; box-sizing: border-box; }
-.log-table { overflow: hidden; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.log-table-head,.log-row { display: grid; grid-template-columns: 150px 150px 100px 130px minmax(260px,1fr) 90px; gap: 12px; align-items: center; padding: 13px 16px; }.log-table-head { background: #f7f9fc; color: #8b98aa; font-size: 11px; font-weight: 700; }.log-row { border-top: 1px solid #edf1f7; color: #526078; font-size: 12px; }.log-action { color: #24334e; font-weight: 700; }.log-user-cell,.log-time,.log-ip { color: #7b8798; }.module-tag { width: fit-content; padding: 4px 9px; border-radius: 20px; background: #eef9f4; color: #18a66c; font-size: 10px; }.log-detail { overflow: hidden; color: #657389; text-overflow: ellipsis; white-space: nowrap; }.empty-card { padding: 70px 20px; border: 1px dashed #dce5f0; border-radius: 14px; background: #fff; color: #9aa6b6; text-align: center; font-size: 13px; }
+.page-heading { margin-bottom: 22px; display: flex; align-items: center; justify-content: space-between; }
+.heading-title { display: block; color: #172541; font-size: 28px; font-weight: 700; }
+.heading-desc { display: block; margin-top: 6px; color: #8b98aa; font-size: 14px; }
+.refresh-btn,.clear-btn { height: 40px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; }
+.refresh-btn { background: #1677ff; color: #fff; }
+.clear-btn { background: #f1f4f8; color: #69778c; }
+.summary-grid { margin-bottom: 18px; display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+.summary-card { padding: 18px 20px; display: flex; flex-direction: column; background: #fff; border: 1px solid #edf1f7; border-radius: 12px; }
+.summary-value { color: #1677ff; font-size: 25px; font-weight: 700; }
+.summary-value.green { color: #18a66c; }
+.summary-value.purple { color: #7650e8; }
+.summary-value.dark { color: #24334e; }
+.summary-label { margin-top: 5px; color: #8b98aa; font-size: 12px; }
+.filter-panel { margin-bottom: 16px; padding: 14px; display: flex; gap: 12px; background: #fff; border: 1px solid #edf1f7; border-radius: 12px; }
+.search-box { flex: 1; height: 40px; padding: 0 12px; display: flex; align-items: center; background: #f7f9fc; border-radius: 9px; }
+.search-input { flex: 1; font-size: 13px; }
+.filter-picker { height: 40px; min-width: 132px; padding: 0 14px; display: flex; align-items: center; justify-content: center; border: 1px solid #e2e9f2; border-radius: 9px; color: #59677d; font-size: 12px; box-sizing: border-box; }
+.log-list { display: flex; flex-direction: column; gap: 10px; }
+.log-card { padding: 15px 16px; background: #fff; border: 1px solid #edf1f7; border-radius: 12px; }
+.log-main { display: flex; gap: 12px; align-items: flex-start; }
+.log-avatar { width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: #eef5ff; color: #1677ff; font-size: 13px; font-weight: 700; }
+.log-copy { min-width: 0; flex: 1; }
+.log-title-row { display: flex; align-items: center; gap: 9px; }
+.log-action { color: #24334e; font-size: 14px; font-weight: 700; }
+.module-tag { width: fit-content; padding: 4px 9px; border-radius: 20px; background: #eef9f4; color: #18a66c; font-size: 10px; }
+.log-detail { display: block; margin-top: 7px; color: #657389; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; word-break: break-word; }
+.log-meta { margin-top: 12px; padding-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; border-top: 1px solid #edf1f7; color: #7b8798; font-size: 11px; }
+.empty-card { padding: 70px 20px; border: 1px dashed #dce5f0; border-radius: 14px; background: #fff; color: #9aa6b6; text-align: center; font-size: 13px; }
 @media screen and (max-width:900px) {
   .page-heading { margin-bottom: 20rpx; }.page-heading>view:first-child { display: none; }.refresh-btn,.clear-btn { height: 70rpx; padding: 0 22rpx; border-radius: 13rpx; font-size: 23rpx; }
-  .summary-grid { gap: 12rpx; }.summary-card { padding: 20rpx 14rpx; border-radius: 18rpx; }.summary-value { font-size: 34rpx; }.summary-label { font-size: 20rpx; }
-  .filter-panel { padding: 18rpx; flex-wrap: wrap; gap: 14rpx; border-radius: 19rpx; }.search-box { width: 100%; flex-basis: 100%; height: 70rpx; }.search-input { font-size: 23rpx; }.filter-picker { height: 70rpx; min-width: 210rpx; font-size: 22rpx; }.log-table { border-radius: 20rpx; }.log-table-head { display: none; }.log-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8rpx; padding: 24rpx; }.log-action { font-size: 27rpx; }.module-tag,.log-detail,.log-user-cell,.log-time,.log-ip { font-size: 20rpx; }.log-detail { white-space: normal; }
+  .summary-grid { grid-template-columns: repeat(2,1fr); gap: 12rpx; }.summary-card { padding: 20rpx 14rpx; border-radius: 18rpx; }.summary-value { font-size: 34rpx; }.summary-label { font-size: 20rpx; }
+  .filter-panel { padding: 18rpx; flex-wrap: wrap; gap: 14rpx; border-radius: 19rpx; }.search-box { width: 100%; flex-basis: 100%; height: 70rpx; }.search-input { font-size: 23rpx; }.filter-picker { height: 70rpx; min-width: 210rpx; font-size: 22rpx; }
+  .log-list { gap: 14rpx; }.log-card { padding: 24rpx; border-radius: 20rpx; }.log-avatar { width: 58rpx; height: 58rpx; border-radius: 16rpx; font-size: 24rpx; }.log-title-row { align-items: flex-start; flex-direction: column; gap: 8rpx; }.log-action { font-size: 27rpx; }.module-tag,.log-detail,.log-meta { font-size: 20rpx; }.log-meta { gap: 10rpx; flex-direction: column; }
 }
 </style>
