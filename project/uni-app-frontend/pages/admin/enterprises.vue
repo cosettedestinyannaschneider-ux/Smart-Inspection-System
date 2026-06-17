@@ -141,7 +141,7 @@
     <!-- 企业信息编辑弹窗，保存后更新当前最新数据 -->
     <view v-if="showEditModal" class="modal-mask" @click="closeEdit">
       <view class="modal-panel" @click.stop="">
-        <view class="modal-header"><view><text class="modal-title">编辑企业信息</text><text class="modal-desc">修改后保存为企业最新档案数据</text></view><text class="modal-close" @click="closeEdit">×</text></view>
+        <view class="modal-header"><view><text class="modal-title">编辑企业信息</text><text class="modal-desc">管理员维护的是全局企业档案，保存后会影响关联检查员和报告展示</text></view><text class="modal-close" @click="closeEdit">×</text></view>
         <scroll-view scroll-y class="modal-body">
           <view class="edit-grid">
             <view class="form-item full"><text class="form-label">企业名称</text><input v-model="editForm.name" class="form-input" /></view>
@@ -169,7 +169,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import AdminShell from '../../components/admin/AdminShell.vue'
-import { apiUrl, assetUrl, request, unwrapResponse } from '../../common/api-config'
+import { apiUrl, assetUrl, downloadFile, getAccessToken, request, unwrapResponse } from '../../common/api-config'
 
 /** 当前管理员信息 */
 const user = ref({})
@@ -364,6 +364,18 @@ const closeEdit = () => { showEditModal.value = false; closeStatusDropdowns() }
 /** 调用后端接口保存企业完整档案 */
 const saveEnterprise = async () => {
   if (!String(editForm.value.name || '').trim()) return uni.showToast({ title: '请输入企业名称', icon: 'none' })
+  uni.showModal({
+    title: '确认保存企业档案',
+    content: '本次修改会更新企业全局基础档案，并影响关联检查员、历史报告展示和后续统计。确定继续保存吗？',
+    success: async (result) => {
+      if (!result.confirm) return
+      await submitEnterpriseUpdate()
+    }
+  })
+}
+
+/** 真正提交企业档案更新，供二次确认后调用 */
+const submitEnterpriseUpdate = async () => {
   try {
     await postAdmin('/api/admin/enterprises/update', {
       id: editForm.value.id,
@@ -415,15 +427,38 @@ const exportExcel = async () => {
 }
 
 /** 下载 Word 或 PDF 报告 */
-const downloadReport = (report, format) => {
-  const path = format === 'word' ? report.word_path : report.pdf_path
-  if (!path) return uni.showToast({ title: '报告文件不存在', icon: 'none' })
-  const url = assetUrl(path)
+const downloadReport = async (report, format) => {
+  const legacyPath = format === 'word' ? report.word_path : report.pdf_path
+  if (!report?.id && !legacyPath) return uni.showToast({ title: '报告文件不存在', icon: 'none' })
+  const url = report?.id ? apiUrl(`/api/files/reports/${report.id}/${format}`) : assetUrl(legacyPath)
   // #ifdef H5
-  window.open(url)
+  try {
+    const response = await fetch(url, {
+      headers: getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {},
+    })
+    if (!response.ok) throw new Error('下载失败')
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null)
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const blob = await response.blob()
+    if (String(blob.type || '').includes('application/json')) {
+      const payload = JSON.parse(await blob.text().catch(() => '{}'))
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `${report.title || 'inspection-report'}.${format === 'word' ? 'docx' : 'pdf'}`
+    link.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    uni.showToast({ title: error?.message || '报告下载失败，请刷新后重试', icon: 'none' })
+  }
   // #endif
   // #ifndef H5
-  uni.downloadFile({
+  downloadFile({
     url,
     success: (res) => {
       uni.openDocument({ filePath: res.tempFilePath })

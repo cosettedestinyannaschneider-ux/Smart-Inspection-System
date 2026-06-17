@@ -1,30 +1,49 @@
 <template>
   <view class="container login-container">
-    <view class="card login-card">
-      <view class="brand-logo">🛡️</view>
-      <text class="brand-name">智检系统</text>
-      <text class="brand-slogan">安全生产社会服务平台</text>
-
-      <view class="login-form">
-        <view class="form-item">
-          <text class="label">账号</text>
-          <input class="input" type="text" v-model="username" placeholder="请输入用户名" />
+    <view class="login-shell">
+      <view class="brand-panel">
+        <view class="brand-mark">智检</view>
+        <text class="brand-title">安全生产社会化服务智检系统</text>
+        <text class="brand-copy">企业档案、隐患图片、AI 分析和报告生成统一入口</text>
+        <view class="brand-points">
+          <text>检查员工作台</text>
+          <text>管理员后台</text>
+          <text>报告生成</text>
         </view>
-        <view class="form-item">
-          <text class="label">密码</text>
-          <view class="password-input-wrapper">
-            <input class="input" type="text" :password="!showPassword" v-model="password" placeholder="请输入密码" />
-            <image
-              class="toggle-password-icon"
-              :src="showPassword ? '/static/icons/eye-off.png' : '/static/icons/eye.png'"
-              @tap="showPassword = !showPassword"
-            />
+      </view>
+      <view class="card login-card">
+        <view class="login-heading">
+          <view class="brand-logo">智</view>
+          <view>
+            <text class="brand-name">登录系统</text>
+            <text class="brand-slogan">使用分配的检查员或管理员账号进入</text>
           </view>
         </view>
-        <button class="submit-btn" type="primary" :loading="loading" @click="handleLogin">登录系统</button>
-        <view class="register-link">
-          <text class="text-muted">连接不上？</text>
-          <text class="link-text" @click="goToSettings">服务器设置</text>
+
+        <view class="login-form">
+          <view class="form-item">
+            <text class="label">账号</text>
+            <input class="input" type="text" v-model="username" placeholder="请输入用户名" />
+          </view>
+          <view class="form-item">
+            <text class="label">密码</text>
+            <view class="password-input-wrapper">
+              <input class="input" type="text" :password="!showPassword" v-model="password" placeholder="请输入密码" />
+              <image
+                class="toggle-password-icon"
+                :src="showPassword ? '/static/icons/eye-off.png' : '/static/icons/eye.png'"
+                @tap="showPassword = !showPassword"
+              />
+            </view>
+          </view>
+          <button class="submit-btn" type="primary" :loading="loading" @click="handleLogin">{{ loading ? '正在登录...' : '登录系统' }}</button>
+          <view class="login-tip">
+            <text>连接不上？</text>
+            <text class="link-text" @click="goToSettings">服务器设置</text>
+          </view>
+          <view class="security-note">
+            <text>数据库密码和模型 API Key 均由本地环境配置或后端加密保存，不会在页面明文展示。</text>
+          </view>
         </view>
       </view>
     </view>
@@ -102,26 +121,109 @@ const goToSettings = () => {
   display: flex;
   justify-content: center;
   align-items: center;
+  min-height: 100vh;
+  padding: 32px;
+  background: #f3f6fa;
+  box-sizing: border-box;
+}
+.login-shell {
+  width: 100%;
+  max-width: 960px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  align-items: stretch;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(15, 28, 50, .08);
+}
+.brand-panel {
+  padding: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #182333;
+  color: #fff;
+}
+.brand-mark {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 12px;
+  background: #1677ff;
+  font-size: 17px;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+.brand-title {
+  display: block;
+  margin-top: 26px;
+  max-width: 360px;
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.brand-copy {
+  display: block;
+  margin-top: 14px;
+  max-width: 360px;
+  color: #b8c2d2;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.brand-points {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.brand-points text {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.08);
+  color: #d6e1ee;
+  font-size: 12px;
 }
 .login-card {
-  width: 90%;
-  max-width: 400px;
-  text-align: center;
-  padding: 40px 20px;
+  width: auto;
+  max-width: none;
+  padding: 48px 38px;
+  text-align: left;
+  box-shadow: none;
+  border: 0;
+}
+.login-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 34px;
 }
 .brand-logo {
-  font-size: 48px;
-  margin-bottom: 10px;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
 }
 .brand-name {
   font-size: 24px;
   font-weight: bold;
   display: block;
+  color: #172541;
 }
 .brand-slogan {
-  font-size: 14px;
-  color: #999;
-  margin-bottom: 30px;
+  margin-top: 5px;
+  font-size: 13px;
+  color: #8b98aa;
   display: block;
 }
 .form-item {
@@ -130,18 +232,29 @@ const goToSettings = () => {
 }
 .label {
   font-size: 14px;
-  font-weight: bold;
+  font-weight: 700;
   margin-bottom: 10px;
   display: block;
+  color: #39465c;
 }
 .input {
   width: 100%;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
-  background-color: #f8f9fa;
-  border: 1px solid #eee;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 9px;
+  background-color: #f8fafc;
+  border: 1px solid #dde5ef;
   box-sizing: border-box;
+  font-size: 14px;
+  color: #24334e;
+}
+.submit-btn {
+  height: 48px;
+  line-height: 48px;
+  border-radius: 9px;
+  background: #1677ff;
+  font-size: 16px;
+  font-weight: 600;
 }
 .password-input-wrapper {
   position: relative;
@@ -158,13 +271,52 @@ const goToSettings = () => {
   transform: translateY(-50%);
   z-index: 2;
 }
-.register-link {
+.login-tip {
   margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
   font-size: 14px;
+  color: #69778c;
 }
 .link-text {
-  color: #0d6efd;
+  color: #1677ff;
   font-weight: bold;
-  margin-left: 5px;
+}
+.security-note {
+  margin-top: 18px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: #f7fafc;
+  border: 1px solid #e7edf5;
+  color: #758398;
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media screen and (max-width: 760px) {
+  .login-container {
+    align-items: stretch;
+    padding: 18px;
+  }
+  .login-shell {
+    display: block;
+    border-radius: 12px;
+  }
+  .brand-panel {
+    padding: 26px;
+  }
+  .brand-title {
+    margin-top: 18px;
+    font-size: 24px;
+  }
+  .brand-copy {
+    font-size: 13px;
+  }
+  .login-card {
+    padding: 28px 22px;
+  }
+  .login-heading {
+    margin-bottom: 26px;
+  }
 }
 </style>

@@ -143,7 +143,7 @@
 - **URL**: `POST /api/enterprise/update`
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `enterprise:manage`
-- **参数**: `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `inspector_name`, `inspection_date`, `project_name`
+- **参数**: `name` (String, 必填), `region`, `address`, `contact`, `phone`, `industry`, `enterprise_type`, `scale`, `production_process`, `inspector_name`, `inspection_date`, `project_name`
 
 ---
 
@@ -157,6 +157,10 @@
 - **参数**: `prompt` (String), `session_id` (String, 可选), `model_id` (Number, 可选), `file` (File, 可选)
 - **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
 
+> 业务范围：纯文本请求会进行安全生产业务范围保底判断。与安全检查、隐患分析、整改建议、法规标准、企业安全管理或报告生成无关的问题会返回业务范围提示，不生成 Word/PDF 报告。
+>
+> 模型能力：上传图片或进行隐患图片分析时，需要选择支持视觉/多模态输入的模型。若模型 API Key、API 地址、模型 ID 或图片能力异常，后端返回归一化错误提示，不暴露 API Key、请求头或供应商原始响应。
+
 ### 3.2 多图智能隐患分析
 - **URL**: `POST /api/hazard/analyze`
 - **方法**: `POST` (JSON)
@@ -164,6 +168,10 @@
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选), `model_id` (Number, 可选)
 - **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
+
+> 图片顺序：后端按 `image_ids` 的传入顺序读取图片，并要求 AI 结果中的 `image_id` 与该顺序一致，避免报告中的“图片 1/2/3”与用户选择顺序错位。
+>
+> 法规依据：当前知识库条款结构化已支持管理员上传后的条款管理，但本接口尚未把本地条款检索结果注入 AI 上下文。AI 不能高置信确认具体条款时，应返回“需人工复核具体条款”，避免编造法规编号或条款内容。
 
 ### 3.3 编辑保存分析结果
 - **URL**: `POST /api/history/update-result`
@@ -436,9 +444,11 @@ Authorization: Bearer <access_token>
 |------|-----|------|
 | POST | `/api/admin/config/ai` | 当前激活的配置 |
 | POST | `/api/admin/config/ai/list` | 全部配置列表 |
+| POST | `/api/admin/config/ai/env-default` | 只读查看环境变量兜底模型 |
 | POST | `/api/admin/config/ai/add` | 新增模型配置 |
 | POST | `/api/admin/config/ai/update` | 更新模型配置 |
 | POST | `/api/admin/config/ai/activate` | 激活指定配置 |
+| POST | `/api/admin/config/ai/test` | 手动检测指定模型配置连通性 |
 | POST | `/api/admin/config/ai/delete` | 删除配置 |
 
 > 新增配置示例：`{ name, provider, base_url, api_key, model_name, max_tokens?, temperature?, timeout_ms? }`
@@ -526,9 +536,11 @@ Authorization: Bearer <access_token>
 | 接口 | 请求参数 | 前端说明 |
 |---|---|---|
 | `POST /api/admin/config/ai/list` | 无业务参数 | 必须返回脱敏的 `api_key_masked`，禁止返回原始密钥字段 |
+| `POST /api/admin/config/ai/env-default` | 无业务参数 | 返回 `.env` 兜底模型的只读脱敏信息，不进入数据库配置列表 |
 | `POST /api/admin/config/ai/add` | `name`、`provider`、`base_url`、`api_key`、`model_name`、`max_tokens`、`temperature`、`timeout_ms` | 新增时 API Key 必填 |
 | `POST /api/admin/config/ai/update` | `id` 与允许修改的配置字段 | `api_key` 留空时保持原密钥 |
 | `POST /api/admin/config/ai/activate` | `id` | 切换当前启用模型 |
+| `POST /api/admin/config/ai/test` | `id` | 后端使用已保存配置发起最小化模型调用；仅返回脱敏后的成功/失败提示 |
 | `POST /api/admin/config/ai/delete` | `id` | 当前启用模型禁止删除 |
 
 模型列表页面需要的返回字段：
@@ -551,6 +563,8 @@ Authorization: Bearer <access_token>
 > 安全要求：AI 配置列表和当前配置接口均不得返回可还原的 API Key；详细整改任务见 `BACKEND_TODO.md`。
 >
 > 环境要求：若需要对 `ai_model_configs` 中的密钥做加密存储与运行时解密，后端必须配置 `MODEL_CONFIG_SECRET`。历史明文记录会在读取时自动迁移为密文。
+>
+> 检测说明：`/api/admin/config/ai/test` 不返回 API Key、请求头、原始模型响应或供应商错误原文。该接口会触发一次最小化模型调用，因此只由管理员手动点击检测，不在保存配置或公共 CI 中自动执行。
 
 ### 8.5 报告模板管理
 | 方法 | URL | 说明 |

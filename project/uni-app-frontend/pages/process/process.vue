@@ -2,16 +2,23 @@
   <view class="app-container">
     <!-- 侧边栏：PC端显示，移动端可切换 -->
     <view class="sidebar" :class="{ 'sidebar-active': showSidebar }">
+      <view class="sidebar-brand">
+        <view class="sidebar-logo">智检</view>
+        <view class="sidebar-brand-copy">
+          <text class="sidebar-title">智检系统</text>
+          <text class="sidebar-subtitle">安全检查助手</text>
+        </view>
+      </view>
       <view class="new-chat-btn" @click="startNewChat">
         <text class="icon">+</text>
         <text>开启新对话</text>
       </view>
-      
+
       <scroll-view scroll-y class="history-list">
-        <view 
-          v-for="session in sessionList" 
-          :key="session.session_id" 
-          class="history-item" 
+        <view
+          v-for="session in sessionList"
+          :key="session.session_id"
+          class="history-item"
           :class="{ 'item-active': currentSessionId === session.session_id }"
           @click="loadSession(session.session_id)"
         >
@@ -23,17 +30,18 @@
       <view class="sidebar-footer">
         <view class="footer-btns">
           <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="showEnterpriseModal = true">
-            <text class="icon">🏢</text>
-            <text>企业信息管理</text>
+            <text>企业档案</text>
           </view>
           <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="openHazardImageModal">
-            <text class="icon">📷</text>
-            <text>隐患图片</text>
+            <text>图片记录</text>
           </view>
         </view>
         <view class="user-info" @click="toggleUserMenu">
-          <view class="avatar">{{ user.username?.substring(0,1).toUpperCase() }}</view>
-          <text class="username">{{ user.username }}</text>
+          <view class="avatar">{{ userInitial }}</view>
+          <view class="user-copy">
+            <text class="username">{{ user.username || '用户' }}</text>
+            <text class="user-role">{{ user.role === 'admin' ? '管理员' : '检查员' }}</text>
+          </view>
         </view>
       </view>
     </view>
@@ -42,7 +50,7 @@
     <view class="main-content">
       <!-- 顶部状态栏 -->
       <view class="header">
-        <view class="menu-toggle" @click="showSidebar = !showSidebar">☰</view>
+        <view class="menu-toggle" @click="showSidebar = !showSidebar">菜单</view>
         <text class="header-title">{{ currentSessionTitle || '智检助手' }}</text>
         <view class="header-btns">
           <button class="mini-btn admin-btn" v-if="user.role === 'admin'" @click="goToAdmin">系统管理</button>
@@ -52,20 +60,22 @@
 
       <!-- 聊天流 -->
       <view class="chat-flow-container">
-        <scroll-view 
-          scroll-y 
-          class="chat-flow" 
-          :scroll-into-view="lastMessageId" 
+        <scroll-view
+          scroll-y
+          class="chat-flow"
+          :scroll-into-view="lastMessageId"
           scroll-with-animation
         >
           <view v-if="messages.length === 0" class="welcome-guide">
             <text class="welcome-title">您好，我是智检助手。请上传现场隐患图片或输入描述，我将为您进行安全检查分析。</text>
             <view class="guide-cards">
               <view class="guide-card" @click="prompt = '请根据最新的安全生产标准，结合已选隐患照片进行分析'">
-                <text>🔍 智能隐患排查</text>
+                <text class="guide-card-title">智能隐患排查</text>
+                <text class="guide-card-desc">分析照片和现场描述</text>
               </view>
               <view class="guide-card" @click="prompt = '请解释安全生产法中关于企业主体责任的相关规定'">
-                <text>📄 查阅安全规范</text>
+                <text class="guide-card-title">查阅安全规范</text>
+                <text class="guide-card-desc">咨询法规条款与依据</text>
               </view>
             </view>
           </view>
@@ -75,39 +85,69 @@
             <view v-if="msg.role === 'user'" class="message-user">
               <view class="message-bubble">
                 <image v-if="msg.image" :src="msg.image" mode="aspectFit" class="message-image" @click="previewImage(msg.image)" />
+                <view v-if="msg.images && msg.images.length" class="message-image-grid">
+                  <image
+                    v-for="img in msg.images"
+                    :key="img.id || img.url"
+                    :src="img.url"
+                    mode="aspectFill"
+                    class="message-thumb"
+                    @click="previewImage(img.url)"
+                  />
+                </view>
                 <text class="message-text">{{ msg.content }}</text>
               </view>
+              <view class="user-avatar-mini">{{ userInitial }}</view>
             </view>
             <!-- AI 消息 -->
             <view v-else class="message-ai">
-              <view class="ai-avatar">🤖</view>
-              <view class="message-bubble">
+              <view class="ai-avatar">智</view>
+              <view class="message-bubble" :class="{ 'report-bubble': parseStructuredData(msg.content) || msg.isEditing }">
+                <view v-if="msg.loading" class="thinking-state">
+                  <text class="thinking-dot"></text>
+                  <view class="thinking-copy">
+                    <text class="thinking-title">正在分析</text>
+                    <text class="thinking-desc">识别图片并生成报告，请稍候...</text>
+                  </view>
+                </view>
                 <!-- 9.6 结构化输出渲染与编辑 -->
-                <view v-if="parseStructuredData(msg.content)" class="structured-result">
+                <view v-else-if="parseStructuredData(msg.content)" class="structured-result">
+                  <view class="struct-header">
+                    <text class="struct-title">分析结果</text>
+                    <text class="struct-subtitle">{{ parseStructuredData(msg.content).mode === 'multi' ? '多图隐患分析' : '单项隐患分析' }}</text>
+                  </view>
                   <view v-if="!msg.isEditing">
                      <view v-if="parseStructuredData(msg.content).mode === 'single'">
-                       <view class="struct-item">
+                       <view class="struct-grid">
+                       <view class="struct-section">
                          <text class="struct-label">隐患描述：</text>
                          <text class="struct-value">{{ parseStructuredData(msg.content).hazard_description }}</text>
                        </view>
-                       <view class="struct-item">
+                       <view class="struct-section">
                          <text class="struct-label">排查依据：</text>
                          <text class="struct-value">{{ parseStructuredData(msg.content).basis }}</text>
                        </view>
-                       <view class="struct-item">
+                       <view class="struct-section">
                          <text class="struct-label">整改建议：</text>
                          <text class="struct-value">{{ parseStructuredData(msg.content).suggestion }}</text>
                        </view>
+                       </view>
                      </view>
-                     <view v-else>
-                       <view v-for="(item, idx) in parseStructuredData(msg.content).items" :key="idx" class="struct-item">
-                         <text class="struct-label">隐患分析（{{ idx + 1 }}） image_id={{ item.image_id }}</text>
-                         <text class="struct-label">隐患描述：</text>
-                         <text class="struct-value">{{ item.hazard_description }}</text>
-                         <text class="struct-label">排查依据：</text>
-                         <text class="struct-value">{{ item.basis }}</text>
-                         <text class="struct-label">整改建议：</text>
-                         <text class="struct-value">{{ item.suggestion }}</text>
+                     <view v-else class="struct-list">
+                       <view v-for="(item, idx) in parseStructuredData(msg.content).items" :key="idx" class="struct-card">
+                         <text class="struct-heading">隐患分析 {{ idx + 1 }}<text v-if="item.image_id"> · 图片 {{ item.image_id }}</text></text>
+                         <view class="struct-section">
+                           <text class="struct-label">隐患描述：</text>
+                           <text class="struct-value">{{ item.hazard_description }}</text>
+                         </view>
+                         <view class="struct-section">
+                           <text class="struct-label">排查依据：</text>
+                           <text class="struct-value">{{ item.basis }}</text>
+                         </view>
+                         <view class="struct-section">
+                           <text class="struct-label">整改建议：</text>
+                           <text class="struct-value">{{ item.suggestion }}</text>
+                         </view>
                        </view>
                      </view>
                     <view class="struct-actions">
@@ -115,42 +155,48 @@
                     </view>
                   </view>
                   <view v-else class="struct-edit-form">
-                     <view v-if="msg.editData.mode === 'single'">
-                       <view class="struct-item">
+                    <view v-if="msg.editData.mode === 'single'" class="struct-grid edit-grid">
+                       <view class="struct-section">
                          <text class="struct-label">隐患描述：</text>
-                         <textarea class="struct-textarea" v-model="msg.editData.hazard_description" auto-height></textarea>
+                         <textarea class="struct-textarea" v-model="msg.editData.hazard_description"></textarea>
                        </view>
-                       <view class="struct-item">
+                       <view class="struct-section">
                          <text class="struct-label">排查依据：</text>
-                         <textarea class="struct-textarea" v-model="msg.editData.basis" auto-height></textarea>
+                         <textarea class="struct-textarea" v-model="msg.editData.basis"></textarea>
                        </view>
-                       <view class="struct-item">
+                       <view class="struct-section">
                          <text class="struct-label">整改建议：</text>
-                         <textarea class="struct-textarea" v-model="msg.editData.suggestion" auto-height></textarea>
+                         <textarea class="struct-textarea" v-model="msg.editData.suggestion"></textarea>
                        </view>
                      </view>
-                     <view v-else>
-                       <view v-for="(item, idx) in msg.editData.items" :key="idx" class="struct-item">
-                         <text class="struct-label">隐患分析（{{ idx + 1 }}） image_id={{ item.image_id }}</text>
-                         <text class="struct-label">隐患描述：</text>
-                         <textarea class="struct-textarea" v-model="item.hazard_description" auto-height></textarea>
-                         <text class="struct-label">排查依据：</text>
-                         <textarea class="struct-textarea" v-model="item.basis" auto-height></textarea>
-                         <text class="struct-label">整改建议：</text>
-                         <textarea class="struct-textarea" v-model="item.suggestion" auto-height></textarea>
+                     <view v-else class="struct-list">
+                       <view v-for="(item, idx) in msg.editData.items" :key="idx" class="struct-card">
+                         <text class="struct-heading">隐患分析 {{ idx + 1 }}<text v-if="item.image_id"> · 图片 {{ item.image_id }}</text></text>
+                         <view class="struct-section">
+                           <text class="struct-label">隐患描述：</text>
+                           <textarea class="struct-textarea" v-model="item.hazard_description"></textarea>
+                         </view>
+                         <view class="struct-section">
+                           <text class="struct-label">排查依据：</text>
+                           <textarea class="struct-textarea" v-model="item.basis"></textarea>
+                         </view>
+                         <view class="struct-section">
+                           <text class="struct-label">整改建议：</text>
+                           <textarea class="struct-textarea" v-model="item.suggestion"></textarea>
+                         </view>
                        </view>
                      </view>
                     <view class="struct-actions">
-                      <button class="mini-btn cancel-btn" @click="cancelEditResult(msg)">取消</button>
+                      <button class="mini-btn struct-cancel-btn" @click="cancelEditResult(msg)">取消</button>
                       <button class="mini-btn save-btn" :disabled="savingResult" @click="saveEditResult(msg)">保存</button>
                     </view>
                   </view>
                 </view>
                 <text v-else class="message-text" selectable>{{ msg.content }}</text>
-                
+
                 <view v-if="msg.wordPath || msg.pdfPath" class="file-links">
-                  <text class="file-link" @click="handleDownload(msg.wordPath)">📎 Word 报告</text>
-                  <text class="file-link" @click="handleDownload(msg.pdfPath)">📎 PDF 报告</text>
+                  <text class="file-link" @click="handleDownload(msg.wordPath, 'word', msg)">Word 报告</text>
+                  <text class="file-link" @click="handleDownload(msg.pdfPath, 'pdf', msg)">PDF 报告</text>
                 </view>
               </view>
             </view>
@@ -162,30 +208,48 @@
       <!-- 底部输入区 -->
       <view class="input-container">
         <view class="input-wrapper">
-          <view class="attachment-btn" @click="handlePickImage">
-            <text class="icon">{{ imagePath ? '🖼️' : '➕' }}</text>
+          <view v-if="selectedHazardImages.length" class="selected-preview">
+            <scroll-view scroll-x class="selected-preview-scroll">
+              <view class="selected-preview-row">
+                <view v-for="img in selectedHazardImages" :key="img.id" class="selected-preview-item">
+                  <image class="selected-preview-image" :src="fileUrl(img.file_path)" mode="aspectFill" @click="previewImage(fileUrl(img.file_path))" />
+                  <view class="selected-preview-meta">
+                    <text class="selected-preview-name">{{ img.original_name || ('图片 #' + img.id) }}</text>
+                    <text class="selected-preview-sub">{{ formatFileSize(img.file_size) }}</text>
+                  </view>
+                  <text class="selected-preview-remove" @click="removeSelectedHazard(img.id)">×</text>
+                </view>
+              </view>
+            </scroll-view>
           </view>
-          <!-- 模型选择 -->
-          <picker class="model-picker" :range="modelList" range-key="label" :value="selectedModelIndex" @change="onModelChange">
-            <view class="model-selector">
-              <text class="model-label">{{ modelList[selectedModelIndex]?.label || '默认模型' }}</text>
-              <text class="model-arrow">▼</text>
-            </view>
-          </picker>
-          <view v-if="selectedHazardIds.length" class="selected-hazard-tip">
-            <text>已选隐患照片 {{ selectedHazardIds.length }} 张</text>
-            <text class="clear-link" @click="clearSelectedHazards">清空</text>
-          </view>
-          <textarea 
-            class="chat-input" 
-            v-model="prompt" 
-            placeholder="输入隐患描述或点击左侧上传图片..." 
-            auto-height 
+          <textarea
+            class="chat-input"
+            v-model="prompt"
+            placeholder="输入现场描述、整改要求或安全生产问题..."
             :maxlength="1000"
             @confirm="handleSend"
             fixed
           />
-          <view class="send-actions">
+          <view class="input-toolbar">
+            <view class="toolbar-left">
+              <view class="attachment-btn" @click="handlePickImage">
+                <text>{{ selectedHazardIds.length || imagePath ? '图片已选' : '上传图片' }}</text>
+              </view>
+              <!-- 模型选择 -->
+              <picker class="model-picker" :range="modelList" range-key="label" :value="selectedModelIndex" @change="onModelChange">
+                <view class="model-selector">
+                  <view class="model-copy">
+                    <text class="model-name-text">{{ selectedModelName }}</text>
+                    <text v-if="selectedModelCode" class="model-code-text">{{ selectedModelCode }}</text>
+                  </view>
+                  <text class="model-arrow">切换</text>
+                </view>
+              </picker>
+              <view v-if="selectedHazardIds.length" class="selected-hazard-tip">
+                <text>已选 {{ selectedHazardIds.length }} 张</text>
+                <text class="clear-link" @click="clearSelectedHazards">清空</text>
+              </view>
+            </view>
             <button
               class="send-btn"
               :disabled="!loading && (!prompt && !imagePath && selectedHazardIds.length === 0)"
@@ -203,13 +267,17 @@
       <view class="form-modal-content">
         <!-- 弹窗头部：带返回按钮 -->
         <view class="form-header">
-          <text class="cancel-btn" @click="showEnterpriseModal = false">❮</text>
+          <text class="modal-back-btn" @click="showEnterpriseModal = false">‹</text>
           <text class="header-title">添加企业信息</text>
         </view>
 
         <!-- 表单主体：滚动区域 -->
         <scroll-view scroll-y class="form-body">
           <view class="form-section">
+            <view class="form-section-title">
+              <text>基础档案</text>
+              <text>用于报告抬头、企业归属和后续统计</text>
+            </view>
             <!-- 企业名称 -->
             <view class="form-item">
               <view class="item-label">
@@ -257,6 +325,35 @@
           </view>
 
           <view class="form-section">
+            <view class="form-section-title">
+              <text>企业属性</text>
+              <text>用于风险统计和报告补充信息</text>
+            </view>
+            <view class="form-item">
+              <view class="item-label">
+                <text>所属行业</text>
+              </view>
+              <input class="item-input" v-model="enterpriseForm.industry" placeholder="例如：建筑施工" placeholder-class="placeholder" />
+            </view>
+            <view class="form-item">
+              <view class="item-label">
+                <text>企业类型</text>
+              </view>
+              <input class="item-input" v-model="enterpriseForm.enterprise_type" placeholder="例如：有限责任公司" placeholder-class="placeholder" />
+            </view>
+            <view class="form-item border-none">
+              <view class="item-label">
+                <text>企业规模</text>
+              </view>
+              <input class="item-input" v-model="enterpriseForm.scale" placeholder="例如：中型" placeholder-class="placeholder" />
+            </view>
+          </view>
+
+          <view class="form-section">
+            <view class="form-section-title">
+              <text>联系与检查</text>
+              <text>用于现场排查记录和报告签发信息</text>
+            </view>
             <!-- 联系人 -->
             <view class="form-item">
               <view class="item-label">
@@ -267,12 +364,42 @@
             </view>
 
             <!-- 联系电话 -->
-            <view class="form-item border-none">
+            <view class="form-item">
               <view class="item-label">
                 <text class="required">*</text>
                 <text>联系电话</text>
               </view>
               <input class="item-input" v-model="enterpriseForm.phone" placeholder="请输入联系方式" type="number" placeholder-class="placeholder" />
+            </view>
+            <view class="form-item border-none">
+              <view class="item-label">
+                <text>现场排查人员</text>
+              </view>
+              <input class="item-input" v-model="enterpriseForm.inspector_name" placeholder="请输入排查人员姓名" placeholder-class="placeholder" />
+            </view>
+          </view>
+
+          <view class="form-section">
+            <view class="form-section-title">
+              <text>排查补充</text>
+              <text>用于报告正文和后续复查记录</text>
+            </view>
+            <view class="form-item">
+              <view class="item-label">
+                <text>排查日期</text>
+              </view>
+              <input class="item-input" v-model="enterpriseForm.inspection_date" placeholder="例如：2026-06-17" placeholder-class="placeholder" />
+            </view>
+            <view class="form-item form-item-vertical border-none">
+              <view class="item-label">
+                <text>生产工艺/现场概况</text>
+              </view>
+              <textarea
+                class="item-textarea"
+                v-model="enterpriseForm.production_process"
+                placeholder="可填写主要生产流程、施工阶段、重点区域等"
+                placeholder-class="placeholder"
+              />
             </view>
           </view>
         </scroll-view>
@@ -289,18 +416,20 @@
     <view v-if="showHazardImageModal && user.role !== 'admin'" class="form-modal-mask">
       <view class="form-modal-content">
         <view class="form-header">
-          <text class="cancel-btn" @click="showHazardImageModal = false">❮</text>
+          <text class="modal-back-btn" @click="showHazardImageModal = false">‹</text>
           <text class="header-title">隐患图片上传</text>
         </view>
 
         <view class="hazard-toolbar">
-          <button class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="pickHazardImages">
-            {{ hazardUploading ? '上传中...' : '选择图片上传' }}
-          </button>
-          <button v-if="hazardFailedPaths.length" class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="retryFailedUploads">
-            重试失败({{ hazardFailedPaths.length }})
-          </button>
-          <button class="footer-action-btn secondary-btn" @click="fetchHazardImages">刷新</button>
+          <view class="hazard-toolbar-main">
+            <button class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="pickHazardImages">
+              {{ hazardUploading ? '上传中...' : '选择图片上传' }}
+            </button>
+            <button v-if="hazardFailedPaths.length" class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="retryFailedUploads">
+              重试失败({{ hazardFailedPaths.length }})
+            </button>
+            <button class="footer-action-btn secondary-btn" @click="fetchHazardImages">刷新列表</button>
+          </view>
           <view v-if="selectedHazardIds.length" class="hazard-selected-info">
             <text>已选 {{ selectedHazardIds.length }} 张</text>
             <text class="hazard-clear" @click="clearSelectedHazards">清空</text>
@@ -311,7 +440,10 @@
           <view v-if="hazardImageList.length === 0" class="empty-tip">暂无图片，请先上传</view>
           <view v-else class="hazard-grid">
             <view v-for="img in hazardImageList" :key="img.id" class="hazard-item">
-              <image class="hazard-thumb" :src="fileUrl(img.file_path)" mode="aspectFill" @click="previewImage(fileUrl(img.file_path))" />
+              <view class="hazard-thumb-wrap">
+                <image class="hazard-thumb" :src="fileUrl(img.file_path)" mode="aspectFill" @click="previewImage(fileUrl(img.file_path))" />
+                <text class="hazard-status">{{ selectedHazardIds.includes(img.id) ? '已选' : '待选' }}</text>
+              </view>
               <view
                 class="hazard-select"
                 :class="{ active: selectedHazardIds.includes(img.id) }"
@@ -320,8 +452,14 @@
                 <text v-if="selectedHazardIds.includes(img.id)" class="hazard-select-icon">✓</text>
               </view>
               <view class="hazard-meta">
-                <text class="hazard-name">{{ img.original_name || ('图片 #' + img.id) }}</text>
-                <button class="hazard-del" @click.stop="deleteHazardImage(img)">删除</button>
+                <view class="hazard-copy">
+                  <text class="hazard-name">{{ img.original_name || ('图片 #' + img.id) }}</text>
+                  <text class="hazard-sub">{{ formatFileSize(img.file_size) }} · {{ formatDateTime(img.created_at) }}</text>
+                </view>
+                <view class="hazard-card-actions">
+                  <button class="hazard-action" @click.stop="toggleHazardSelect(img)">{{ selectedHazardIds.includes(img.id) ? '取消' : '选择' }}</button>
+                  <button class="hazard-del" @click.stop="deleteHazardImage(img)">删除</button>
+                </view>
               </view>
             </view>
           </view>
@@ -347,8 +485,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
-import { apiUrl, clearLoginSession, downloadFile, fileUrl, getStoredUser, request, requestTask, uploadFile } from '../../common/api-config'
+import { ref, computed, onMounted, nextTick } from 'vue'
+import { apiUrl, clearLoginSession, downloadFile, fileUrl, getAccessToken, getStoredUser, request, requestTask, uploadFile } from '../../common/api-config'
 
 const user = ref({})
 const prompt = ref('')
@@ -361,7 +499,21 @@ const sessionList = ref([])
 const showSidebar = ref(false)
 const lastMessageId = ref('')
 const showEnterpriseModal = ref(false)
-const enterpriseForm = ref({ name: '', region: '', address: '', contact: '', phone: '', project_name: '', industry: '', inspector_name: '' })
+const createEmptyEnterpriseForm = () => ({
+  name: '',
+  region: '',
+  address: '',
+  contact: '',
+  phone: '',
+  project_name: '',
+  industry: '',
+  enterprise_type: '',
+  scale: '',
+  production_process: '',
+  inspector_name: '',
+  inspection_date: '',
+})
+const enterpriseForm = ref(createEmptyEnterpriseForm())
 const showHazardImageModal = ref(false)
 const hazardImageList = ref([])
 const hazardUploading = ref(false)
@@ -375,6 +527,56 @@ const currentRequestTask = ref(null)
 const modelList = ref([])
 const selectedModelId = ref(null)
 const selectedModelIndex = ref(0)
+let pendingAssistantMessage = null
+
+/** 当前用户头像显示内容，避免用户侧消息没有身份标识 */
+const userInitial = computed(() => String(user.value?.username || 'U').slice(0, 1).toUpperCase())
+
+/** 当前模型配置名称，和模型 ID 分开展示，避免重复长文本挤压输入区 */
+const selectedModel = computed(() => modelList.value[selectedModelIndex.value] || modelList.value[0] || { label: '默认模型', code: '' })
+const selectedModelName = computed(() => selectedModel.value.label || '默认模型')
+const selectedModelCode = computed(() => {
+  const label = String(selectedModel.value.label || '').trim().toLowerCase()
+  const code = String(selectedModel.value.code || '').trim()
+  return code && code.toLowerCase() !== label ? code : ''
+})
+
+/** 当前输入区已选图片，直接展示缩略图，避免用户只能去图片记录里确认 */
+const selectedHazardImages = computed(() => {
+  const recordMap = new Map(hazardImageList.value.map((img) => [Number(img.id), img]))
+  return selectedHazardIds.value
+    .map((id) => recordMap.get(Number(id)))
+    .filter(Boolean)
+})
+
+/** 将图片记录转为聊天气泡中的轻量预览数据 */
+const mapHazardImagesForMessage = (ids) => {
+  const recordMap = new Map(hazardImageList.value.map((img) => [Number(img.id), img]))
+  return ids
+    .map((id) => recordMap.get(Number(id)))
+    .filter(Boolean)
+    .map((img) => ({
+      id: Number(img.id),
+      url: fileUrl(img.file_path),
+      name: img.original_name || `图片 #${img.id}`,
+    }))
+}
+
+/** 格式化图片文件大小，避免图片记录列表只显示文件名 */
+const formatFileSize = (value) => {
+  const size = Number(value || 0)
+  if (!size) return '大小未知'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 格式化上传时间，数据库为空时保持简洁占位 */
+const formatDateTime = (value) => {
+  if (!value) return '时间未知'
+  const text = String(value).replace('T', ' ').replace(/\.\d+Z?$/, '')
+  return text.length > 16 ? text.slice(0, 16) : text
+}
 
 // 尝试解析结构化数据 (9.6 智能隐患分析模块)
 const parseStructuredData = (content) => {
@@ -492,7 +694,7 @@ const openHazardImageModal = () => {
  */
 const fetchHazardImages = () => {
   if (!user.value?.id) return
-  request({
+  return request({
     url: apiUrl('/api/hazard/images/list'),
     method: 'GET',
   }).then((res) => {
@@ -557,7 +759,7 @@ const uploadHazardImages = async (filePaths) => {
       })
       if (!ok) hazardFailedPaths.value.push(fp)
     }
-    fetchHazardImages()
+    await fetchHazardImages()
     if (hazardFailedPaths.value.length) {
       uni.showToast({ title: `部分失败：${hazardFailedPaths.value.length} 张`, icon: 'none' })
     } else {
@@ -641,15 +843,24 @@ const fetchModelList = () => {
   }).then((res) => {
       const data = res.data?.data || res.data || []
       if (Array.isArray(data) && data.length) {
-        modelList.value = [
-          { id: null, label: '默认模型' },
-          ...data.map((m) => ({ id: m.id, label: m.name + ' (' + m.model_name + ')' })),
-        ]
+        modelList.value = data.map((m) => ({
+          id: m.id,
+          label: m.name || m.model_name || '未命名模型',
+          code: m.model_name || '',
+          isActive: !!m.is_active,
+        }))
+        const activeIndex = modelList.value.findIndex((item) => item.isActive)
+        selectedModelIndex.value = activeIndex >= 0 ? activeIndex : 0
+        selectedModelId.value = modelList.value[selectedModelIndex.value]?.id || null
       } else {
-        modelList.value = [{ id: null, label: '默认模型' }]
+        modelList.value = [{ id: null, label: '环境默认模型', code: '服务端 .env 兜底' }]
+        selectedModelIndex.value = 0
+        selectedModelId.value = null
       }
     }).catch(() => {
-      modelList.value = [{ id: null, label: '默认模型' }]
+      modelList.value = [{ id: null, label: '环境默认模型', code: '服务端 .env 兜底' }]
+      selectedModelIndex.value = 0
+      selectedModelId.value = null
     })
 }
 
@@ -669,11 +880,10 @@ const fetchEnterpriseInfo = () => {
   }).then((res) => {
       if (res.data.success) {
         const d = res.data
-        enterpriseForm.value = d.data && typeof d.data === 'object' && Object.keys(d.data).length
-          ? d.data
-          : { name: d.name || '', region: d.region || '', address: d.address || '', contact: d.contact || '', phone: d.phone || '', project_name: d.project_name || '', industry: d.industry || '', inspector_name: d.inspector_name || '' }
+        const enterpriseData = d.data && typeof d.data === 'object' && Object.keys(d.data).length ? d.data : d
+        enterpriseForm.value = { ...createEmptyEnterpriseForm(), ...enterpriseData }
         /** 保存企业 ID 用于后续上传和分析时自动关联 */
-        currentEnterpriseId.value = d.id || null
+        currentEnterpriseId.value = enterpriseData.id || d.id || null
       }
     }).catch(() => {})
 }
@@ -723,18 +933,18 @@ const loadSession = (sessionId) => {
   currentSessionId.value = sessionId
   const session = sessionList.value.find(s => s.session_id === sessionId)
   currentSessionTitle.value = session ? session.title : '对话详情'
-  
+
   request({
     url: apiUrl(`/api/session/${sessionId}`),
   }).then((res) => {
       if (res.data.success) {
         messages.value = res.data.data.map(item => [
           { role: 'user', content: item.prompt, image: item.image_path ? fileUrl(item.image_path) : null },
-          { 
+          {
             id: item.id,
-            role: 'assistant', 
-            content: item.result, 
-            wordPath: item.wordPath || item.word_path, 
+            role: 'assistant',
+            content: item.result,
+            wordPath: item.wordPath || item.word_path,
             pdfPath: item.pdfPath || item.pdf_path,
             isEditing: false,
             editData: null
@@ -753,6 +963,7 @@ const startNewChat = () => {
   messages.value = []
   prompt.value = ''
   imagePath.value = ''
+  selectedHazardIds.value = []
   if (uni.getSystemInfoSync().windowWidth < 768) showSidebar.value = false
 }
 
@@ -782,15 +993,30 @@ const handleSend = () => {
   if (loading.value) return
   if (!prompt.value && !imagePath.value && selectedHazardIds.value.length === 0) return
 
-  const suffix = selectedHazardIds.value.length ? `\n（已选择隐患照片：${selectedHazardIds.value.length} 张）` : ''
-  const userMsg = { role: 'user', content: `${prompt.value || ''}${suffix}`.trim(), image: imagePath.value }
-  messages.value.push(userMsg)
   const currentPrompt = prompt.value
   const currentImage = imagePath.value
   const selectedIds = selectedHazardIds.value.slice()
-  
+  const selectedImages = mapHazardImagesForMessage(selectedIds)
+  const suffix = selectedIds.length ? `\n（已选择隐患照片：${selectedIds.length} 张）` : ''
+  const userMsg = {
+    role: 'user',
+    content: `${currentPrompt || ''}${suffix}`.trim(),
+    image: currentImage,
+    images: selectedImages,
+  }
+  messages.value.push(userMsg)
+  pendingAssistantMessage = {
+    role: 'assistant',
+    content: '',
+    loading: true,
+    isEditing: false,
+    editData: null,
+  }
+  messages.value.push(pendingAssistantMessage)
+
   prompt.value = ''
   imagePath.value = ''
+  selectedHazardIds.value = []
   loading.value = true
   scrollToBottom()
 
@@ -808,7 +1034,7 @@ const handleSend = () => {
         model_id: selectedModelId.value || '',
       },
       success: (res) => handleResponse(JSON.parse(res.data)),
-      fail: () => handleError(),
+      fail: (error) => handleError(error),
       complete: () => {
         currentRequestTask.value = null
         loading.value = false
@@ -831,7 +1057,7 @@ const handleSend = () => {
         model_id: selectedModelId.value || '',
       },
       success: (res) => handleResponse(res.data),
-      fail: () => handleError(),
+      fail: (error) => handleError(error),
       complete: () => {
         currentRequestTask.value = null
         loading.value = false
@@ -851,7 +1077,7 @@ const handleSend = () => {
       model_id: selectedModelId.value || '',
     },
     success: (res) => handleResponse(res.data),
-    fail: () => handleError(),
+    fail: (error) => handleError(error),
     complete: () => {
       currentRequestTask.value = null
       loading.value = false
@@ -865,9 +1091,9 @@ const handleResponse = (data) => {
     uni.showToast({ title: '服务器返回异常', icon: 'none' })
     return
   }
-  
+
   if (data.success) {
-    messages.value.push({
+    const assistantMessage = {
       id: data.id,
       role: 'assistant',
       content: data.result,
@@ -875,17 +1101,39 @@ const handleResponse = (data) => {
       pdfPath: data.pdfPath,
       isEditing: false,
       editData: null
-    })
+    }
+    if (pendingAssistantMessage) {
+      Object.assign(pendingAssistantMessage, assistantMessage, { loading: false })
+    } else {
+      messages.value.push(assistantMessage)
+    }
+    pendingAssistantMessage = null
     currentSessionId.value = data.sessionId
     fetchSessions()
     scrollToBottom()
   } else {
+    if (pendingAssistantMessage) {
+      Object.assign(pendingAssistantMessage, {
+        loading: false,
+        content: data.msg || data.message || 'AI 分析失败，请检查模型配置或稍后重试。',
+      })
+      pendingAssistantMessage = null
+      scrollToBottom()
+    }
     uni.showToast({ title: data.msg || data.message || '处理失败', icon: 'none' })
   }
 }
 
 const handleError = (err) => {
   console.error('Request Error:', err)
+  if (pendingAssistantMessage) {
+    Object.assign(pendingAssistantMessage, {
+      loading: false,
+      content: '请求失败：网络连接超时或模型服务暂时不可用，请检查模型配置后重试。',
+    })
+    pendingAssistantMessage = null
+    scrollToBottom()
+  }
   uni.showToast({ title: '网络连接超时或错误', icon: 'none' })
 }
 
@@ -895,6 +1143,13 @@ const stopCurrentRequest = () => {
   try {
     currentRequestTask.value?.abort?.()
   } catch (e) {}
+  if (pendingAssistantMessage) {
+    Object.assign(pendingAssistantMessage, {
+      loading: false,
+      content: '已停止本次生成。',
+    })
+    pendingAssistantMessage = null
+  }
   currentRequestTask.value = null
   loading.value = false
   uni.showToast({ title: '已停止', icon: 'none' })
@@ -912,6 +1167,12 @@ const toggleHazardSelect = (img) => {
 // 清空多图分析选择
 const clearSelectedHazards = () => {
   selectedHazardIds.value = []
+}
+
+// 移除单张已选图片，保留其他图片继续分析
+const removeSelectedHazard = (id) => {
+  const targetId = Number(id)
+  selectedHazardIds.value = selectedHazardIds.value.filter((item) => Number(item) !== targetId)
 }
 
 const scrollToBottom = () => {
@@ -947,11 +1208,34 @@ const previewImage = (url) => {
   uni.previewImage({ urls: [url] })
 }
 
-const handleDownload = (path) => {
-  if (!path) return
-  const url = fileUrl(path)
+const handleDownload = async (path, format = 'pdf', msg = {}) => {
+  if (!path && !msg?.id) return
+  const url = msg?.id ? apiUrl(`/api/files/reports/${msg.id}/${format}`) : fileUrl(path)
   // #ifdef H5
-  window.open(url)
+  try {
+    const response = await fetch(url, {
+      headers: getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {},
+    })
+    if (!response.ok) throw new Error('下载失败')
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null)
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const blob = await response.blob()
+    if (String(blob.type || '').includes('application/json')) {
+      const payload = JSON.parse(await blob.text().catch(() => '{}'))
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `inspection-report.${format === 'word' ? 'docx' : 'pdf'}`
+    link.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    uni.showToast({ title: error?.message || '报告下载失败，请刷新后重试', icon: 'none' })
+  }
   // #endif
   // #ifndef H5
   downloadFile({
@@ -994,20 +1278,59 @@ const goToAdmin = () => {
 .app-container {
   display: flex;
   height: 100vh;
-  background-color: #f7f7f8;
+  background-color: #ffffff;
   overflow: hidden;
 }
 
 /* 侧边栏样式 */
 .sidebar {
-  width: 260px;
-  background-color: #202123;
-  color: white;
+  width: 268px;
+  background-color: #f7f8fa;
+  color: #202123;
   display: flex;
   flex-direction: column;
-  padding: 10px;
+  padding: 14px 12px;
   transition: transform 0.3s;
   z-index: 100;
+  border-right: 1px solid #eceff3;
+  box-sizing: border-box;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 16px;
+}
+
+.sidebar-logo {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #202123;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sidebar-brand-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-title {
+  color: #202123;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.sidebar-subtitle {
+  margin-top: 3px;
+  color: #8a919c;
+  font-size: 12px;
 }
 
 @media (max-width: 768px) {
@@ -1024,20 +1347,23 @@ const goToAdmin = () => {
 .new-chat-btn {
   display: flex;
   align-items: center;
-  padding: 12px;
-  border: 1px solid #4d4d4f;
-  border-radius: 5px;
-  margin-bottom: 15px;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  margin-bottom: 16px;
   cursor: pointer;
   transition: background 0.2s;
+  color: #202123;
+  font-size: 14px;
+  background: #ffffff;
 }
 
 .new-chat-btn:hover {
-  background-color: #2b2c2f;
+  background-color: #f1f3f5;
 }
 
 .new-chat-btn .icon {
-  margin-right: 10px;
   font-size: 20px;
 }
 
@@ -1046,21 +1372,23 @@ const goToAdmin = () => {
 }
 
 .history-item {
-  padding: 10px 12px;
-  margin-bottom: 5px;
-  border-radius: 5px;
+  padding: 10px 11px;
+  margin-bottom: 4px;
+  border-radius: 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
+  color: #404856;
 }
 
 .history-item:hover {
-  background-color: #2b2c2f;
+  background-color: #eef0f3;
 }
 
 .item-active {
-  background-color: #343541;
+  background-color: #e7f0ff;
+  color: #155ec5;
 }
 
 .history-title {
@@ -1073,7 +1401,7 @@ const goToAdmin = () => {
 
 .delete-icon {
   padding: 0 5px;
-  color: #8e8ea0;
+  color: #8a919c;
   opacity: 0;
   transition: opacity 0.2s;
 }
@@ -1083,30 +1411,53 @@ const goToAdmin = () => {
 }
 
 .sidebar-footer {
-  padding-top: 10px;
-  border-top: 1px solid #4d4d4f;
+  padding-top: 12px;
+  border-top: 1px solid #eceff3;
   margin-top: auto; /* 确保它贴紧底部 */
 }
 
 .user-info {
   display: flex;
   align-items: center;
-  padding: 12px;
-  margin-top: 5px;
-  border-radius: 6px;
+  padding: 10px;
+  margin-top: 6px;
+  border-radius: 8px;
   transition: background 0.2s;
 }
-.user-info:hover { background-color: #2b2c2f; }
+.user-info:hover { background-color: #eef0f3; }
 
 .avatar {
-  width: 32px;
-  height: 32px;
-  background-color: #0d6efd;
-  border-radius: 4px;
+  width: 34px;
+  height: 34px;
+  background-color: #202123;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 10px;
+  font-weight: 700;
+}
+
+.user-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.username {
+  max-width: 150px;
+  color: #202123;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  color: #8a919c;
+  font-size: 12px;
 }
 
 .footer-btns {
@@ -1115,20 +1466,19 @@ const goToAdmin = () => {
 .footer-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 6px;
+  padding: 10px 11px;
+  border-radius: 8px;
   cursor: pointer;
-  color: #ececf1;
+  color: #404856;
   font-size: 14px;
   transition: background 0.2s;
 }
 .action-btn {
-  background-color: #343541; /* 给予它一定的背景色区别于侧边栏 */
-  margin-bottom: 8px;
+  background-color: transparent;
+  margin-bottom: 4px;
 }
-.footer-btn:hover { 
-  background-color: #3e3f4b; 
+.footer-btn:hover {
+  background-color: #eef0f3;
 }
 
 /* -----------------------------------------------------------
@@ -1137,14 +1487,14 @@ const goToAdmin = () => {
 .form-modal-mask {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: #f5f6f8; /* 浅灰色背景，类似页面背景 */
+  background: #ffffff;
   z-index: 3000;
   display: flex;
   flex-direction: column;
 }
 
 .form-modal-content {
-  background: transparent;
+  background: #ffffff;
   width: 100%;
   height: 100%;
   display: flex;
@@ -1153,77 +1503,126 @@ const goToAdmin = () => {
 
 /* 弹窗头部：带返回按钮 */
 .form-header {
-  height: 56px;
+  height: 64px;
   background: #ffffff;
   display: flex;
   align-items: center;
-  padding: 0 15px;
+  padding: 0 24px;
   position: relative;
   flex-shrink: 0;
+  border-bottom: 1px solid #eceff3;
+  box-sizing: border-box;
 }
 
 .header-title {
-  font-size: 18px;
-  font-weight: 500;
-  color: #333333;
+  font-size: 20px;
+  font-weight: 600;
+  color: #202123;
   flex: 1;
   text-align: center;
 }
 
-.cancel-btn {
+.modal-back-btn {
   position: absolute;
-  left: 15px;
-  font-size: 24px;
-  color: #333;
-  padding: 5px 10px 5px 0;
+  left: 20px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #f7f8fa;
+  color: #59606b;
+  font-size: 26px;
+  line-height: 1;
 }
 
 /* 表单主体 */
 .form-body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 18px 20px;
+  box-sizing: border-box;
 }
 
 /* 分组块样式 (白色卡片) */
 .form-section {
   background: #ffffff;
-  border-radius: 8px;
-  padding: 0 15px;
-  margin-bottom: 12px;
+  border: 1px solid #eceff3;
+  border-radius: 10px;
+  padding: 6px 20px;
+  margin: 0 auto 14px;
+  max-width: 900px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 24px;
+  box-sizing: border-box;
+}
+
+.form-section-title {
+  padding: 16px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  grid-column: 1 / -1;
+}
+
+.form-section-title text:first-child {
+  color: #202123;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.form-section-title text:last-child {
+  color: #8a919c;
+  font-size: 12px;
 }
 
 /* 单个表单项 */
 .form-item {
   display: flex;
   align-items: center;
-  padding: 16px 0;
-  border-bottom: 1px solid #f0f0f0;
+  min-height: 58px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eceff3;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .border-none {
   border-bottom: none;
 }
 
+.form-item:nth-last-child(2) {
+  border-bottom: none;
+}
+
 .item-label {
-  width: 110px;
-  font-size: 15px;
-  color: #333333;
+  width: 128px;
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #404856;
   display: flex;
   align-items: center;
 }
 
 .required {
-  color: #4c83f3; /* 蓝色星号 */
+  color: #202123;
   margin-right: 4px;
   font-size: 16px;
 }
 
 .item-input {
   flex: 1;
-  font-size: 15px;
-  color: #333333;
-  text-align: right;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  font-size: 14px;
+  color: #202123;
+  text-align: left;
+  box-sizing: border-box;
 }
 
 .placeholder {
@@ -1259,7 +1658,9 @@ const goToAdmin = () => {
 .form-item-vertical {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   padding: 16px 0;
+  grid-column: 1 / -1;
 }
 
 .form-item-vertical .item-label {
@@ -1267,56 +1668,47 @@ const goToAdmin = () => {
   margin-bottom: 10px;
 }
 
-.textarea-wrapper {
-  background: #f8f9fb;
-  border-radius: 6px;
-  padding: 12px;
-  position: relative;
-}
-
 .item-textarea {
   width: 100%;
-  height: 80px;
+  height: 110px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 7px;
   font-size: 14px;
-  color: #333;
-  line-height: 1.5;
-}
-
-.word-count {
-  position: absolute;
-  bottom: 10px;
-  right: 12px;
-  font-size: 12px;
-  color: #999;
+  color: #202123;
+  line-height: 1.6;
+  box-sizing: border-box;
 }
 
 /* 底部操作区 */
 .form-footer {
-  padding: 15px 20px 25px;
-  background: #f5f6f8;
+  padding: 16px 24px 24px;
+  background: #ffffff;
   display: flex;
-  gap: 15px;
+  justify-content: center;
+  gap: 14px;
 }
 
 .footer-action-btn {
-  flex: 1;
+  width: 220px;
   height: 44px;
   line-height: 44px;
-  border-radius: 6px;
-  font-size: 16px;
+  border-radius: 8px;
+  font-size: 15px;
   text-align: center;
   border: none;
 }
 
 .primary-btn {
-  background: #4c83f3;
+  background: #202123;
   color: #ffffff;
 }
 
 .secondary-btn {
   background: #ffffff;
-  color: #4c83f3;
-  border: 1px solid #4c83f3;
+  color: #202123;
+  border: 1px solid #dfe3e8;
 }
 
 .primary-btn:active, .secondary-btn:active {
@@ -1324,16 +1716,26 @@ const goToAdmin = () => {
 }
 
 .hazard-toolbar {
-  padding: 12px;
-  background: #f5f6f8;
+  padding: 18px 20px;
+  background: #ffffff;
   display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
+.hazard-toolbar-main {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .hazard-body {
   flex: 1;
-  padding: 12px;
+  padding: 0 20px 24px;
+  box-sizing: border-box;
 }
 
 .empty-tip {
@@ -1344,46 +1746,99 @@ const goToAdmin = () => {
 }
 
 .hazard-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
 }
 
 .hazard-item {
-  width: calc(50% - 6px);
   background: #fff;
-  border-radius: 8px;
+  border: 1px solid #eceff3;
+  border-radius: 10px;
   overflow: hidden;
+  position: relative;
+  box-shadow: none;
+}
+
+.hazard-thumb-wrap {
+  position: relative;
+  height: 156px;
+  background: #f1f3f5;
 }
 
 .hazard-thumb {
   width: 100%;
-  height: 120px;
-  background: #eee;
+  height: 156px;
+  display: block;
+}
+
+.hazard-status {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(32,33,35,.78);
+  color: #fff;
+  font-size: 12px;
 }
 
 .hazard-meta {
-  padding: 10px 12px;
+  padding: 12px;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hazard-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .hazard-name {
-  flex: 1;
-  font-size: 12px;
-  color: #333;
+  font-size: 13px;
+  font-weight: 600;
+  color: #202123;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+.hazard-sub {
+  color: #8b98aa;
+  font-size: 12px;
+}
+
+.hazard-card-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+}
+
+.hazard-action,
 .hazard-del {
   background: transparent;
-  border: none;
-  padding: 0;
+  border: 1px solid #dfe3e8;
+  border-radius: 7px;
+  padding: 0 8px;
+  height: 28px;
+  line-height: 28px;
   font-size: 12px;
-  color: #ff4d4f;
+}
+
+.hazard-action {
+  color: #202123;
+  background: #f7f8fa;
+}
+
+.hazard-del {
+  color: #e05252;
+  background: #fff7f7;
 }
 
 .confirm-mask {
@@ -1459,24 +1914,34 @@ const goToAdmin = () => {
 }
 
 .header {
-  height: 50px;
+  height: 54px;
   display: flex;
   align-items: center;
-  padding: 0 15px;
+  padding: 0 18px;
   background-color: #fff;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid #eceff3;
   flex-shrink: 0; /* 禁止头部压缩 */
 }
 
 .menu-toggle {
-  font-size: 20px;
-  margin-right: 15px;
+  min-width: 42px;
+  height: 30px;
+  margin-right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #59606b;
+  background: #f7f8fa;
+  font-size: 12px;
   cursor: pointer;
 }
 
 .header-title {
   flex: 1;
-  font-weight: bold;
+  color: #202123;
+  font-size: 15px;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -1484,6 +1949,7 @@ const goToAdmin = () => {
   flex: 1;
   overflow: hidden;
   position: relative;
+  background: #ffffff;
 }
 
 .chat-flow {
@@ -1494,35 +1960,61 @@ const goToAdmin = () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-top: 10vh;
+  margin-top: 12vh;
+  padding: 0 24px;
+  text-align: center;
 }
 
 .welcome-title {
-  font-size: 24px;
-  font-weight: bold;
-  margin-bottom: 30px;
+  max-width: 680px;
+  color: #202123;
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 24px;
+  line-height: 1.5;
 }
 
 .guide-cards {
   display: flex;
-  gap: 15px;
+  gap: 10px;
 }
 
 .guide-card {
-  padding: 15px 20px;
-  background-color: white;
-  border: 1px solid #eee;
-  border-radius: 10px;
+  width: 210px;
+  min-height: 74px;
+  padding: 14px 16px;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #404856;
   cursor: pointer;
   transition: background 0.2s;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  text-align: left;
+  box-sizing: border-box;
 }
 
 .guide-card:hover {
-  background-color: #f7f7f8;
+  background-color: #f7f8fa;
+}
+
+.guide-card-title {
+  color: #202123;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.guide-card-desc {
+  color: #758398;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .message-wrapper {
-  padding: 20px 15%;
+  padding: 14px max(24px, calc((100% - 860px) / 2));
   width: 100%;
   box-sizing: border-box;
 }
@@ -1536,39 +2028,79 @@ const goToAdmin = () => {
 .message-user {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .message-ai {
   display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
 }
 
 .ai-avatar {
   width: 30px;
   height: 30px;
-  background-color: #10a37f;
-  border-radius: 2px;
+  flex-shrink: 0;
+  background-color: #202123;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 15px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.user-avatar-mini {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #202123;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .message-bubble {
-  max-width: 85%;
-  padding: 12px 16px;
-  border-radius: 8px;
+  max-width: min(720px, calc(100vw - 420px));
+  padding: 12px 14px;
+  border-radius: 10px;
   font-size: 15px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+
+.report-bubble {
+  width: min(780px, calc(100vw - 420px));
+  max-width: min(780px, calc(100vw - 420px));
+  padding: 0;
+  overflow: hidden;
 }
 
 .message-user .message-bubble {
-  background-color: #0d6efd;
-  color: white;
+  background-color: #f1f3f5;
+  color: #202123;
 }
 
 .message-ai .message-bubble {
-  background-color: #f7f7f8;
-  border: 1px solid #eee;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  min-width: 0;
+}
+
+.message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-image {
@@ -1579,22 +2111,43 @@ const goToAdmin = () => {
   border-radius: 5px;
 }
 
-.file-links {
-  margin-top: 10px;
+.message-image-grid {
   display: flex;
-  gap: 15px;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  max-width: 360px;
+}
+
+.message-thumb {
+  width: 78px;
+  height: 78px;
+  border-radius: 8px;
+  background: #e9edf2;
+  display: block;
+}
+
+.file-links {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .file-link {
-  color: #0d6efd;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: #f7f8fa;
+  color: #202123;
   font-size: 12px;
   cursor: pointer;
+  border: 1px solid #e5e7eb;
 }
 
 /* 输入框样式 */
 .input-container {
-  padding: 10px 15% 30px; /* 增加底部间距 */
-  background: #f7f7f8;
+  padding: 10px max(24px, calc((100% - 860px) / 2)) 18px;
+  background: #ffffff;
   flex-shrink: 0; /* 禁止输入框压缩 */
 }
 
@@ -1606,47 +2159,165 @@ const goToAdmin = () => {
 
 .input-wrapper {
   background: white;
-  border: 1px solid #eee;
+  border: 1px solid #dfe3e8;
   border-radius: 12px;
-  padding: 8px 12px;
+  padding: 12px;
   display: flex;
-  align-items: flex-end;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 2px 10px rgba(15,28,50,0.06);
+}
+
+.selected-preview {
+  width: 100%;
+  padding-bottom: 2px;
+}
+
+.selected-preview-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.selected-preview-row {
+  display: inline-flex;
+  gap: 10px;
+  min-width: 100%;
+}
+
+.selected-preview-item {
+  position: relative;
+  width: 184px;
+  height: 70px;
+  padding: 8px 28px 8px 8px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 10px;
+  background: #f7f8fa;
+  border: 1px solid #e5e7eb;
+  box-sizing: border-box;
+  vertical-align: top;
+}
+
+.selected-preview-image {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #e9edf2;
+  display: block;
+}
+
+.selected-preview-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.selected-preview-name {
+  max-width: 88px;
+  color: #202123;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.selected-preview-sub {
+  color: #8b98aa;
+  font-size: 11px;
+}
+
+.selected-preview-remove {
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  width: 18px;
+  height: 18px;
+  line-height: 17px;
+  text-align: center;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #59606b;
+  border: 1px solid #dfe3e8;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .attachment-btn {
-  padding: 8px;
+  min-width: 72px;
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #f7f8fa;
+  border: 1px solid #e5e7eb;
   cursor: pointer;
-  color: #8e8ea0;
+  color: #404856;
+  font-size: 12px;
+  font-weight: 600;
+  box-sizing: border-box;
 }
 
 .chat-input {
-  flex: 1;
-  padding: 8px;
-  min-height: 24px;
-  max-height: 200px;
+  width: 100%;
+  height: 78px;
+  min-height: 78px;
+  max-height: 132px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
   font-size: 15px;
+  line-height: 1.6;
+  word-break: break-word;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toolbar-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .selected-hazard-tip {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px;
+  padding: 0 10px;
+  height: 34px;
+  border-radius: 8px;
+  background: #f7fafc;
+  border: 1px solid #e5e7eb;
   font-size: 12px;
   color: #555;
+  box-sizing: border-box;
 }
 
 .clear-link {
-  color: #0d6efd;
+  color: #202123;
+  font-weight: 600;
 }
 
 .send-btn {
-  width: 52px;
-  height: 32px;
-  background-color: #0d6efd;
+  width: 74px;
+  height: 36px;
+  background-color: #202123;
   color: white;
-  border-radius: 6px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1681,76 +2352,219 @@ const goToAdmin = () => {
 /* 9.6 结构化输出样式 */
 .structured-result {
   background: #ffffff;
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  padding: 0;
+  box-shadow: none;
 }
 
-.struct-item {
-  margin-bottom: 12px;
+.struct-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eceff3;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.struct-title {
+  color: #202123;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.struct-subtitle {
+  color: #758398;
+  font-size: 12px;
+}
+
+.struct-grid,
+.struct-list {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.struct-card {
+  padding: 0;
+  border-radius: 0;
+  background: #ffffff;
+  border: 0;
+}
+
+.struct-section {
+  padding: 10px 0;
+  border-radius: 0;
+  background: #ffffff;
+  border-bottom: 1px solid #eceff3;
+}
+
+.struct-card .struct-section + .struct-section {
+  margin-top: 10px;
 }
 
 .struct-label {
-  font-weight: bold;
-  color: #333;
+  font-weight: 700;
+  color: #202123;
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.model-picker {
+  flex-shrink: 0;
+}
+
+.model-selector {
+  min-width: 180px;
+  max-width: 240px;
+  height: 38px;
+  padding: 0 10px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  border: 1px solid #e5e7eb;
+  color: #404856;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.model-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.model-name-text {
+  color: #202123;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-code-text {
+  margin-top: 1px;
+  color: #8b98aa;
+  font-size: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-arrow {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.struct-heading {
+  display: block;
+  color: #202123;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
 }
 
 .struct-value {
-  color: #555;
-  line-height: 1.5;
-  word-break: break-all;
+  display: block;
+  color: #4d5c72;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .struct-textarea {
   width: 100%;
-  min-height: 60px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #f9f9f9;
+  height: 112px;
+  min-height: 112px;
+  padding: 10px 12px;
+  border: 1px solid #dfe3e8;
+  border-radius: 7px;
+  background: #ffffff;
   font-size: 14px;
-  color: #333;
+  color: #202123;
   box-sizing: border-box;
+  line-height: 1.6;
+  overflow-y: auto;
 }
 
 .struct-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-top: 15px;
+  padding: 0 14px 14px;
+  margin-top: 0;
 }
 
 .mini-btn {
-  padding: 4px 12px;
+  min-width: 76px;
+  height: 32px;
+  line-height: 32px;
+  padding: 0 12px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   border: none;
 }
 
 .edit-btn {
-  background: #f0f0f0;
-  color: #333;
+  background: #f7f8fa;
+  color: #202123;
+  border: 1px solid #dfe3e8;
 }
 
-.cancel-btn {
-  background: #ffebeb;
-  color: #e53935;
+.struct-cancel-btn {
+  background: #f2f5f8;
+  color: #526078;
 }
 
 .save-btn {
-  background: #0d6efd;
+  background: #202123;
   color: white;
 }
 
-.send-actions {
+.thinking-state {
   display: flex;
-  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  margin-left: 10px;
+  gap: 12px;
+  color: #526078;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.thinking-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.thinking-title {
+  color: #202123;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.thinking-desc {
+  color: #758398;
+  font-size: 12px;
+}
+
+.thinking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #202123;
+  animation: pulse 1s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1.15); }
 }
 
 /* 9.5 多图选择：隐患图片选中态展示 */
@@ -1758,17 +2572,18 @@ const goToAdmin = () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid #dfe3e8;
   font-size: 12px;
-  color: #555;
+  color: #526078;
 }
 
 .hazard-clear {
-  color: #0d6efd;
-}
-
-.hazard-item {
-  position: relative;
+  color: #202123;
+  font-weight: 600;
 }
 
 .hazard-select {
@@ -1786,13 +2601,146 @@ const goToAdmin = () => {
 }
 
 .hazard-select.active {
-  background: rgba(16,163,127,0.85);
-  border-color: rgba(16,163,127,1);
+  background: rgba(32,33,35,0.85);
+  border-color: rgba(32,33,35,1);
 }
 
 .hazard-select-icon {
   color: #fff;
   font-size: 14px;
   line-height: 1;
+}
+
+@media (max-width: 768px) {
+  .form-body {
+    padding: 12px;
+  }
+  .form-section {
+    grid-template-columns: 1fr;
+    padding: 6px 14px;
+  }
+  .form-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 0;
+  }
+  .item-label {
+    width: 100%;
+  }
+  .form-footer {
+    padding: 12px;
+  }
+  .footer-action-btn {
+    width: auto;
+    flex: 1;
+  }
+  .hazard-toolbar {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .hazard-toolbar-main {
+    width: 100%;
+  }
+  .hazard-toolbar-main .footer-action-btn {
+    flex: 1;
+    min-width: 130px;
+  }
+  .hazard-grid {
+    grid-template-columns: 1fr;
+  }
+  .welcome-guide {
+    margin-top: 8vh;
+  }
+  .welcome-title {
+    font-size: 18px;
+  }
+  .guide-cards {
+    width: 100%;
+    flex-direction: column;
+  }
+  .guide-card {
+    width: 100%;
+  }
+  .message-bubble {
+    max-width: calc(100vw - 72px);
+    font-size: 14px;
+  }
+  .report-bubble {
+    width: calc(100vw - 72px);
+    max-width: calc(100vw - 72px);
+  }
+  .message-user .message-bubble {
+    max-width: calc(100vw - 92px);
+  }
+  .message-image-grid {
+    max-width: calc(100vw - 132px);
+  }
+  .message-thumb {
+    width: 64px;
+    height: 64px;
+  }
+  .input-wrapper {
+    align-items: stretch;
+  }
+  .input-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .toolbar-left {
+    width: 100%;
+  }
+  .attachment-btn {
+    flex-shrink: 0;
+  }
+  .model-picker {
+    flex: 1;
+    min-width: 0;
+  }
+  .model-selector {
+    max-width: none;
+    width: 100%;
+  }
+  .selected-hazard-tip {
+    width: 100%;
+  }
+  .selected-preview-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .selected-preview-item {
+    width: 100%;
+  }
+  .selected-preview-name {
+    max-width: calc(100vw - 168px);
+  }
+  .chat-input {
+    width: 100%;
+    height: 92px;
+    min-height: 92px;
+  }
+  .send-btn {
+    width: 100%;
+  }
+  .structured-result {
+    padding: 0;
+  }
+  .struct-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .struct-grid,
+  .struct-list {
+    padding: 10px;
+  }
+  .struct-section,
+  .struct-card {
+    padding: 10px;
+  }
+  .struct-textarea {
+    height: 128px;
+    min-height: 128px;
+  }
 }
 </style>
