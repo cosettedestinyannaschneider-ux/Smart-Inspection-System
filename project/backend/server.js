@@ -1028,6 +1028,11 @@ app.post('/api/admin/config/ai/list', adminAuth, async (req, res) => {
   catch (err) { res.fail(ErrorCode.DATABASE_ERROR, err.message) }
 })
 
+app.post('/api/admin/config/ai/env-default', adminAuth, async (req, res) => {
+  try { res.success(modelConfigService.getEnvDefaultForClient()) }
+  catch (err) { res.fail(ErrorCode.DATABASE_ERROR, err.message) }
+})
+
 app.post('/api/admin/config/ai/add', adminAuth, async (req, res) => {
   const { name, provider, base_url, api_key, model_name } = req.body
   if (!name || !provider || !base_url || !api_key || !model_name) return res.fail(ErrorCode.PARAM_MISSING)
@@ -1050,6 +1055,13 @@ app.post('/api/admin/config/ai/activate', adminAuth, async (req, res) => {
   try {
     await modelConfigService.activate(req.body.id)
     res.success(null, '已切换为当前模型')
+  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
+})
+
+app.post('/api/admin/config/ai/test', adminAuth, async (req, res) => {
+  if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    res.success(await modelConfigService.testConnection(req.body.id))
   } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
 })
 

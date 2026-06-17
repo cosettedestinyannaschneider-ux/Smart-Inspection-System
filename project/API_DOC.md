@@ -436,9 +436,11 @@ Authorization: Bearer <access_token>
 |------|-----|------|
 | POST | `/api/admin/config/ai` | 当前激活的配置 |
 | POST | `/api/admin/config/ai/list` | 全部配置列表 |
+| POST | `/api/admin/config/ai/env-default` | 只读查看环境变量兜底模型 |
 | POST | `/api/admin/config/ai/add` | 新增模型配置 |
 | POST | `/api/admin/config/ai/update` | 更新模型配置 |
 | POST | `/api/admin/config/ai/activate` | 激活指定配置 |
+| POST | `/api/admin/config/ai/test` | 手动检测指定模型配置连通性 |
 | POST | `/api/admin/config/ai/delete` | 删除配置 |
 
 > 新增配置示例：`{ name, provider, base_url, api_key, model_name, max_tokens?, temperature?, timeout_ms? }`
@@ -526,9 +528,11 @@ Authorization: Bearer <access_token>
 | 接口 | 请求参数 | 前端说明 |
 |---|---|---|
 | `POST /api/admin/config/ai/list` | 无业务参数 | 必须返回脱敏的 `api_key_masked`，禁止返回原始密钥字段 |
+| `POST /api/admin/config/ai/env-default` | 无业务参数 | 返回 `.env` 兜底模型的只读脱敏信息，不进入数据库配置列表 |
 | `POST /api/admin/config/ai/add` | `name`、`provider`、`base_url`、`api_key`、`model_name`、`max_tokens`、`temperature`、`timeout_ms` | 新增时 API Key 必填 |
 | `POST /api/admin/config/ai/update` | `id` 与允许修改的配置字段 | `api_key` 留空时保持原密钥 |
 | `POST /api/admin/config/ai/activate` | `id` | 切换当前启用模型 |
+| `POST /api/admin/config/ai/test` | `id` | 后端使用已保存配置发起最小化模型调用；仅返回脱敏后的成功/失败提示 |
 | `POST /api/admin/config/ai/delete` | `id` | 当前启用模型禁止删除 |
 
 模型列表页面需要的返回字段：
@@ -551,6 +555,8 @@ Authorization: Bearer <access_token>
 > 安全要求：AI 配置列表和当前配置接口均不得返回可还原的 API Key；详细整改任务见 `BACKEND_TODO.md`。
 >
 > 环境要求：若需要对 `ai_model_configs` 中的密钥做加密存储与运行时解密，后端必须配置 `MODEL_CONFIG_SECRET`。历史明文记录会在读取时自动迁移为密文。
+>
+> 检测说明：`/api/admin/config/ai/test` 不返回 API Key、请求头、原始模型响应或供应商错误原文。该接口会触发一次最小化模型调用，因此只由管理员手动点击检测，不在保存配置或公共 CI 中自动执行。
 
 ### 8.5 报告模板管理
 | 方法 | URL | 说明 |

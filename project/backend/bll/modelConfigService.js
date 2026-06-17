@@ -1,4 +1,5 @@
 const aiModelConfigDal = require('../dal/aiModelConfigDal')
+const { OpenAI } = require('openai')
 const C = require('../common/Constants')
 const {
   hasModelConfigSecret,
@@ -7,6 +8,51 @@ const {
   decryptApiKey,
   maskApiKey,
 } = require('./modelConfigCryptoService')
+
+/** 统一清理模型配置中的字符串值，避免空格影响可用性判断 */
+const normalizeValue = (value) => String(value || '').trim()
+
+/** 判断模型 ID 是否仍是占位值，避免误以为默认配置可用 */
+const isPlaceholderModelName = (modelName) => {
+  const normalized = normalizeValue(modelName)
+  return !normalized || normalized === 'replace_with_your_model_id' || normalized === 'default'
+}
+
+/** 判断 API Key 是否仍是占位值，避免泄露或调用无效配置 */
+const isPlaceholderApiKey = (apiKey) => {
+  const normalized = normalizeValue(apiKey)
+  return !normalized || normalized === 'replace_with_your_api_key'
+}
+
+/** 判断 OpenAI 兼容客户端配置是否具备真实调用条件 */
+const hasUsableClientConfig = ({ baseUrl, apiKey, modelName }) => (
+  !!normalizeValue(baseUrl) &&
+  !isPlaceholderApiKey(apiKey) &&
+  !isPlaceholderModelName(modelName)
+)
+
+/** 读取 .env 中的兜底模型配置，仅服务端内部使用明文 Key */
+const getEnvClientConfig = () => ({
+  baseUrl: normalizeValue(process.env.ARK_BASE_URL || C.ARK_BASE_URL),
+  apiKey: normalizeValue(process.env.ARK_API_KEY || ''),
+  modelName: normalizeValue(process.env.ARK_MODEL || ''),
+})
+
+/** 将模型检测错误归一化为管理员可读但不泄露密钥的提示 */
+const normalizeTestError = (error) => {
+  const status = error?.status || error?.response?.status || error?.code || ''
+  const rawMessage = String(error?.message || '')
+  if (status === 401 || status === 403 || /unauthorized|forbidden|api key|authentication/i.test(rawMessage)) {
+    return '鉴权失败，请检查 API Key 是否正确或是否有模型访问权限'
+  }
+  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network|timeout|ETIMEDOUT/i.test(rawMessage)) {
+    return '接口地址无法连接或请求超时，请检查 API 地址和网络'
+  }
+  if (status === 404 || /not found/i.test(rawMessage)) {
+    return '接口地址不存在，请检查 Base URL 是否为 OpenAI 兼容地址'
+  }
+  return '模型接口检测失败，请检查服务商地址、模型 ID 和账号权限'
+}
 
 /** 允许写入数据库的模型配置字段白名单 */
 const MODEL_CONFIG_UPDATE_FIELD_MAP = {
@@ -59,6 +105,34 @@ const assertRequiredFields = ({ name, provider, base_url, model_name }) => {
 }
 
 const modelConfigService = {
+  /** 获取环境变量兜底模型的只读展示信息，不暴露原始 API Key */
+  getEnvDefaultForClient() {
+    const config = getEnvClientConfig()
+    const available = hasUsableClientConfig({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      modelName: config.modelName,
+    })
+    return {
+      id: null,
+      name: '环境兜底模型',
+      provider: '环境变量',
+      base_url: config.baseUrl,
+      model_name: config.modelName || '未配置',
+      max_tokens: C.AI_DEFAULT_MAX_TOKENS,
+      temperature: C.AI_DEFAULT_TEMPERATURE,
+      timeout_ms: C.AI_TIMEOUT_MS,
+      is_env: true,
+      is_active: false,
+      available,
+      api_key_masked: maskApiKey(config.apiKey),
+      status_text: available
+        ? '可作为兜底配置使用'
+        : '未完整配置，仅用于提示',
+      usage_note: '仅当数据库中没有可用的启用模型时，后端才会降级使用该环境配置。',
+    }
+  },
+
   /** 获取当前启用配置，返回脱敏字段 */
   async getActiveForClient() {
     const config = await aiModelConfigDal.findActive()
@@ -161,6 +235,49 @@ const modelConfigService = {
     if (!existing) throw new Error('模型配置不存在')
     if (existing.is_active) throw new Error('当前启用模型禁止删除')
     await aiModelConfigDal.deleteById(targetId)
+  },
+
+  /** 管理员手动检测模型接口连通性，不返回原始响应或密钥 */
+  async testConnection(id) {
+    const targetId = Number(id || 0)
+    if (!targetId) throw new Error('缺少模型配置 ID')
+    const runtimeConfig = await this.getRuntimeConfigById(targetId)
+    if (!runtimeConfig) throw new Error('模型配置不存在')
+    if (!hasUsableClientConfig({
+      baseUrl: runtimeConfig.base_url,
+      apiKey: runtimeConfig.api_key_plain,
+      modelName: runtimeConfig.model_name,
+    })) {
+      return {
+        ok: false,
+        message: '模型配置不完整，请检查 API 地址、API Key 和模型 ID',
+      }
+    }
+
+    try {
+      const client = new OpenAI({
+        baseURL: runtimeConfig.base_url,
+        apiKey: runtimeConfig.api_key_plain,
+        timeout: Math.min(Number(runtimeConfig.timeout_ms || 10000), 15000),
+      })
+      await client.chat.completions.create({
+        model: runtimeConfig.model_name,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 8,
+        temperature: 0,
+      })
+      return {
+        ok: true,
+        message: '模型接口连通正常，API 地址、API Key 与模型 ID 可用',
+        checked_at: new Date().toISOString(),
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message: normalizeTestError(error),
+        checked_at: new Date().toISOString(),
+      }
+    }
   },
 
   /** 供 AIService 使用：读取可直接调用的真实配置，并对旧明文自动迁移 */

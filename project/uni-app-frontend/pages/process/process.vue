@@ -82,8 +82,12 @@
             <view v-else class="message-ai">
               <view class="ai-avatar">🤖</view>
               <view class="message-bubble">
+                <view v-if="msg.loading" class="thinking-state">
+                  <text class="thinking-dot"></text>
+                  <text>正在识别图片、检索依据并生成报告，请稍候...</text>
+                </view>
                 <!-- 9.6 结构化输出渲染与编辑 -->
-                <view v-if="parseStructuredData(msg.content)" class="structured-result">
+                <view v-else-if="parseStructuredData(msg.content)" class="structured-result">
                   <view v-if="!msg.isEditing">
                      <view v-if="parseStructuredData(msg.content).mode === 'single'">
                        <view class="struct-item">
@@ -101,7 +105,7 @@
                      </view>
                      <view v-else>
                        <view v-for="(item, idx) in parseStructuredData(msg.content).items" :key="idx" class="struct-item">
-                         <text class="struct-label">隐患分析（{{ idx + 1 }}） image_id={{ item.image_id }}</text>
+                         <text class="struct-heading">隐患分析 {{ idx + 1 }}<text v-if="item.image_id"> · 图片 {{ item.image_id }}</text></text>
                          <text class="struct-label">隐患描述：</text>
                          <text class="struct-value">{{ item.hazard_description }}</text>
                          <text class="struct-label">排查依据：</text>
@@ -131,7 +135,7 @@
                      </view>
                      <view v-else>
                        <view v-for="(item, idx) in msg.editData.items" :key="idx" class="struct-item">
-                         <text class="struct-label">隐患分析（{{ idx + 1 }}） image_id={{ item.image_id }}</text>
+                         <text class="struct-heading">隐患分析 {{ idx + 1 }}<text v-if="item.image_id"> · 图片 {{ item.image_id }}</text></text>
                          <text class="struct-label">隐患描述：</text>
                          <textarea class="struct-textarea" v-model="item.hazard_description" auto-height></textarea>
                          <text class="struct-label">排查依据：</text>
@@ -149,8 +153,8 @@
                 <text v-else class="message-text" selectable>{{ msg.content }}</text>
                 
                 <view v-if="msg.wordPath || msg.pdfPath" class="file-links">
-                  <text class="file-link" @click="handleDownload(msg.wordPath)">📎 Word 报告</text>
-                  <text class="file-link" @click="handleDownload(msg.pdfPath)">📎 PDF 报告</text>
+                  <text class="file-link" @click="handleDownload(msg.wordPath, 'word', msg)">📎 Word 报告</text>
+                  <text class="file-link" @click="handleDownload(msg.pdfPath, 'pdf', msg)">📎 PDF 报告</text>
                 </view>
               </view>
             </view>
@@ -348,7 +352,7 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { apiUrl, clearLoginSession, downloadFile, fileUrl, getStoredUser, request, requestTask, uploadFile } from '../../common/api-config'
+import { apiUrl, clearLoginSession, downloadFile, fileUrl, getAccessToken, getStoredUser, request, requestTask, uploadFile } from '../../common/api-config'
 
 const user = ref({})
 const prompt = ref('')
@@ -375,6 +379,7 @@ const currentRequestTask = ref(null)
 const modelList = ref([])
 const selectedModelId = ref(null)
 const selectedModelIndex = ref(0)
+let pendingAssistantMessage = null
 
 // 尝试解析结构化数据 (9.6 智能隐患分析模块)
 const parseStructuredData = (content) => {
@@ -785,6 +790,14 @@ const handleSend = () => {
   const suffix = selectedHazardIds.value.length ? `\n（已选择隐患照片：${selectedHazardIds.value.length} 张）` : ''
   const userMsg = { role: 'user', content: `${prompt.value || ''}${suffix}`.trim(), image: imagePath.value }
   messages.value.push(userMsg)
+  pendingAssistantMessage = {
+    role: 'assistant',
+    content: '',
+    loading: true,
+    isEditing: false,
+    editData: null,
+  }
+  messages.value.push(pendingAssistantMessage)
   const currentPrompt = prompt.value
   const currentImage = imagePath.value
   const selectedIds = selectedHazardIds.value.slice()
@@ -808,7 +821,7 @@ const handleSend = () => {
         model_id: selectedModelId.value || '',
       },
       success: (res) => handleResponse(JSON.parse(res.data)),
-      fail: () => handleError(),
+      fail: (error) => handleError(error),
       complete: () => {
         currentRequestTask.value = null
         loading.value = false
@@ -831,7 +844,7 @@ const handleSend = () => {
         model_id: selectedModelId.value || '',
       },
       success: (res) => handleResponse(res.data),
-      fail: () => handleError(),
+      fail: (error) => handleError(error),
       complete: () => {
         currentRequestTask.value = null
         loading.value = false
@@ -851,7 +864,7 @@ const handleSend = () => {
       model_id: selectedModelId.value || '',
     },
     success: (res) => handleResponse(res.data),
-    fail: () => handleError(),
+    fail: (error) => handleError(error),
     complete: () => {
       currentRequestTask.value = null
       loading.value = false
@@ -867,7 +880,7 @@ const handleResponse = (data) => {
   }
   
   if (data.success) {
-    messages.value.push({
+    const assistantMessage = {
       id: data.id,
       role: 'assistant',
       content: data.result,
@@ -875,17 +888,39 @@ const handleResponse = (data) => {
       pdfPath: data.pdfPath,
       isEditing: false,
       editData: null
-    })
+    }
+    if (pendingAssistantMessage) {
+      Object.assign(pendingAssistantMessage, assistantMessage, { loading: false })
+    } else {
+      messages.value.push(assistantMessage)
+    }
+    pendingAssistantMessage = null
     currentSessionId.value = data.sessionId
     fetchSessions()
     scrollToBottom()
   } else {
+    if (pendingAssistantMessage) {
+      Object.assign(pendingAssistantMessage, {
+        loading: false,
+        content: data.msg || data.message || 'AI 分析失败，请检查模型配置或稍后重试。',
+      })
+      pendingAssistantMessage = null
+      scrollToBottom()
+    }
     uni.showToast({ title: data.msg || data.message || '处理失败', icon: 'none' })
   }
 }
 
 const handleError = (err) => {
   console.error('Request Error:', err)
+  if (pendingAssistantMessage) {
+    Object.assign(pendingAssistantMessage, {
+      loading: false,
+      content: '请求失败：网络连接超时或模型服务暂时不可用，请检查模型配置后重试。',
+    })
+    pendingAssistantMessage = null
+    scrollToBottom()
+  }
   uni.showToast({ title: '网络连接超时或错误', icon: 'none' })
 }
 
@@ -895,6 +930,13 @@ const stopCurrentRequest = () => {
   try {
     currentRequestTask.value?.abort?.()
   } catch (e) {}
+  if (pendingAssistantMessage) {
+    Object.assign(pendingAssistantMessage, {
+      loading: false,
+      content: '已停止本次生成。',
+    })
+    pendingAssistantMessage = null
+  }
   currentRequestTask.value = null
   loading.value = false
   uni.showToast({ title: '已停止', icon: 'none' })
@@ -947,11 +989,34 @@ const previewImage = (url) => {
   uni.previewImage({ urls: [url] })
 }
 
-const handleDownload = (path) => {
-  if (!path) return
-  const url = fileUrl(path)
+const handleDownload = async (path, format = 'pdf', msg = {}) => {
+  if (!path && !msg?.id) return
+  const url = msg?.id ? apiUrl(`/api/files/reports/${msg.id}/${format}`) : fileUrl(path)
   // #ifdef H5
-  window.open(url)
+  try {
+    const response = await fetch(url, {
+      headers: getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {},
+    })
+    if (!response.ok) throw new Error('下载失败')
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null)
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const blob = await response.blob()
+    if (String(blob.type || '').includes('application/json')) {
+      const payload = JSON.parse(await blob.text().catch(() => '{}'))
+      throw new Error(payload?.msg || payload?.message || '报告下载失败')
+    }
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `inspection-report.${format === 'word' ? 'docx' : 'pdf'}`
+    link.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    uni.showToast({ title: error?.message || '报告下载失败，请刷新后重试', icon: 'none' })
+  }
   // #endif
   // #ifndef H5
   downloadFile({
@@ -1495,12 +1560,15 @@ const goToAdmin = () => {
   flex-direction: column;
   align-items: center;
   margin-top: 10vh;
+  padding: 0 20px;
+  text-align: center;
 }
 
 .welcome-title {
   font-size: 24px;
   font-weight: bold;
   margin-bottom: 30px;
+  line-height: 1.5;
 }
 
 .guide-cards {
@@ -1540,6 +1608,7 @@ const goToAdmin = () => {
 
 .message-ai {
   display: flex;
+  min-width: 0;
 }
 
 .ai-avatar {
@@ -1559,6 +1628,9 @@ const goToAdmin = () => {
   border-radius: 8px;
   font-size: 15px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-sizing: border-box;
 }
 
 .message-user .message-bubble {
@@ -1569,6 +1641,13 @@ const goToAdmin = () => {
 .message-ai .message-bubble {
   background-color: #f7f7f8;
   border: 1px solid #eee;
+  min-width: 0;
+}
+
+.message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-image {
@@ -1611,6 +1690,7 @@ const goToAdmin = () => {
   padding: 8px 12px;
   display: flex;
   align-items: flex-end;
+  gap: 8px;
   box-shadow: 0 5px 15px rgba(0,0,0,0.05);
 }
 
@@ -1622,10 +1702,13 @@ const goToAdmin = () => {
 
 .chat-input {
   flex: 1;
+  min-width: 0;
   padding: 8px;
   min-height: 24px;
   max-height: 200px;
   font-size: 15px;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .selected-hazard-tip {
@@ -1681,43 +1764,91 @@ const goToAdmin = () => {
 /* 9.6 结构化输出样式 */
 .structured-result {
   background: #ffffff;
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  border-radius: 10px;
+  padding: 14px;
+  border: 1px solid #e6edf5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
 .struct-item {
   margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8fbff;
+  border: 1px solid #edf3fa;
 }
 
 .struct-label {
   font-weight: bold;
-  color: #333;
+  color: #263651;
   display: block;
-  margin-bottom: 4px;
+  margin: 8px 0 4px;
+  font-size: 13px;
+}
+
+.model-picker {
+  flex-shrink: 0;
+}
+
+.model-selector {
+  max-width: 190px;
+  height: 32px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: #f4f7fb;
+  color: #526078;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.model-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-arrow {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.struct-heading {
+  display: block;
+  color: #0d6efd;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
 }
 
 .struct-value {
-  color: #555;
-  line-height: 1.5;
-  word-break: break-all;
+  display: block;
+  color: #4d5c72;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .struct-textarea {
   width: 100%;
-  min-height: 60px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #f9f9f9;
+  min-height: 90px;
+  padding: 10px;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  background: #fff;
   font-size: 14px;
   color: #333;
   box-sizing: border-box;
+  line-height: 1.6;
 }
 
 .struct-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 15px;
 }
@@ -1751,6 +1882,28 @@ const goToAdmin = () => {
   align-items: center;
   gap: 8px;
   margin-left: 10px;
+}
+
+.thinking-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #526078;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.thinking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10a37f;
+  animation: pulse 1s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1.15); }
 }
 
 /* 9.5 多图选择：隐患图片选中态展示 */
@@ -1794,5 +1947,64 @@ const goToAdmin = () => {
   color: #fff;
   font-size: 14px;
   line-height: 1;
+}
+
+@media (max-width: 768px) {
+  .welcome-guide {
+    margin-top: 8vh;
+  }
+  .welcome-title {
+    font-size: 18px;
+  }
+  .guide-cards {
+    width: 100%;
+    flex-direction: column;
+  }
+  .message-bubble {
+    max-width: calc(100vw - 72px);
+    font-size: 14px;
+  }
+  .message-user .message-bubble {
+    max-width: 88%;
+  }
+  .input-wrapper {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .model-picker {
+    flex: 1;
+    min-width: 0;
+  }
+  .model-selector {
+    max-width: none;
+    width: 100%;
+  }
+  .selected-hazard-tip {
+    order: 3;
+    width: 100%;
+  }
+  .chat-input {
+    order: 4;
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .send-actions {
+    order: 5;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .send-btn {
+    width: 86px;
+  }
+  .structured-result {
+    padding: 10px;
+  }
+  .struct-item {
+    padding: 10px;
+  }
+  .struct-textarea {
+    min-height: 120px;
+  }
 }
 </style>

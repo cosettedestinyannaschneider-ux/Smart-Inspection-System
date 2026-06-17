@@ -12,11 +12,22 @@
       <view class="clear-btn" @click="clearFilters">清空筛选</view>
     </view>
     <view v-if="filteredList.length === 0" class="empty-card">暂无符合条件的操作日志</view>
-    <view v-else class="log-list">
-      <view v-for="log in filteredList" :key="log.id" class="log-card">
-        <view class="log-head"><view class="user-avatar">{{ log.username.slice(0, 1) }}</view><view class="log-title-copy"><text class="log-action">{{ log.action }}</text><text class="log-user">{{ log.username }} · {{ log.role }}</text></view><text class="module-tag">{{ log.module }}</text></view>
+    <view v-else class="log-table">
+      <view class="log-table-head">
+        <text>时间</text>
+        <text>用户</text>
+        <text>模块</text>
+        <text>操作</text>
+        <text>详情</text>
+        <text>IP</text>
+      </view>
+      <view v-for="log in filteredList" :key="log.id" class="log-row">
+        <text class="log-time">{{ log.created_at }}</text>
+        <text class="log-user-cell">{{ log.username }} · {{ log.role }}</text>
+        <text class="module-tag">{{ log.module }}</text>
+        <text class="log-action">{{ log.action }}</text>
         <text class="log-detail">{{ log.details || '暂无操作详情' }}</text>
-        <view class="log-meta"><text>IP：{{ log.ip_address || '-' }}</text><text>{{ log.created_at }}</text></view>
+        <text class="log-ip">{{ log.ip_address || '-' }}</text>
       </view>
     </view>
   </AdminShell>
@@ -105,10 +116,10 @@ const clearFilters = () => { keyword.value = ''; activeModule.value = '全部模
 .page-heading { margin-bottom: 22px; display: flex; align-items: center; justify-content: space-between; }.heading-title { display: block; color: #172541; font-size: 28px; font-weight: 700; }.heading-desc { display: block; margin-top: 6px; color: #8b98aa; font-size: 14px; }.refresh-btn,.clear-btn { height: 40px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; }.refresh-btn { background: #1677ff; color: #fff; }.clear-btn { background: #f1f4f8; color: #69778c; }
 .summary-grid { margin-bottom: 18px; display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }.summary-card { padding: 18px 20px; display: flex; flex-direction: column; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.summary-value { color: #1677ff; font-size: 25px; font-weight: 700; }.summary-value.green { color: #18a66c; }.summary-value.purple { color: #7650e8; }.summary-label { margin-top: 5px; color: #8b98aa; font-size: 12px; }
 .filter-panel { margin-bottom: 16px; padding: 14px; display: flex; gap: 12px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.search-box { flex: 1; height: 40px; padding: 0 12px; display: flex; align-items: center; background: #f7f9fc; border-radius: 9px; }.search-icon { margin-right: 8px; color: #8f9bad; }.search-input { flex: 1; font-size: 13px; }.filter-picker { height: 40px; min-width: 120px; padding: 0 14px; display: flex; align-items: center; border: 1px solid #e2e9f2; border-radius: 9px; color: #59677d; font-size: 12px; box-sizing: border-box; }
-.log-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.log-card { padding: 18px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.log-head { display: flex; align-items: center; }.user-avatar { width: 39px; height: 39px; display: flex; align-items: center; justify-content: center; border-radius: 11px; background: #eaf3ff; color: #1677ff; font-weight: 700; }.log-title-copy { flex: 1; margin-left: 11px; display: flex; flex-direction: column; }.log-action { color: #24334e; font-size: 14px; font-weight: 700; }.log-user { margin-top: 3px; color: #96a2b3; font-size: 11px; }.module-tag { padding: 4px 9px; border-radius: 20px; background: #eef9f4; color: #18a66c; font-size: 10px; }.log-detail { display: block; margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f7f9fc; color: #657389; font-size: 12px; }.log-meta { margin-top: 11px; display: flex; justify-content: space-between; color: #a1adbc; font-size: 10px; }.empty-card { padding: 70px 20px; border: 1px dashed #dce5f0; border-radius: 14px; background: #fff; color: #9aa6b6; text-align: center; font-size: 13px; }
+.log-table { overflow: hidden; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.log-table-head,.log-row { display: grid; grid-template-columns: 150px 150px 100px 130px minmax(260px,1fr) 90px; gap: 12px; align-items: center; padding: 13px 16px; }.log-table-head { background: #f7f9fc; color: #8b98aa; font-size: 11px; font-weight: 700; }.log-row { border-top: 1px solid #edf1f7; color: #526078; font-size: 12px; }.log-action { color: #24334e; font-weight: 700; }.log-user-cell,.log-time,.log-ip { color: #7b8798; }.module-tag { width: fit-content; padding: 4px 9px; border-radius: 20px; background: #eef9f4; color: #18a66c; font-size: 10px; }.log-detail { overflow: hidden; color: #657389; text-overflow: ellipsis; white-space: nowrap; }.empty-card { padding: 70px 20px; border: 1px dashed #dce5f0; border-radius: 14px; background: #fff; color: #9aa6b6; text-align: center; font-size: 13px; }
 @media screen and (max-width:900px) {
   .page-heading { margin-bottom: 20rpx; }.page-heading>view:first-child { display: none; }.refresh-btn,.clear-btn { height: 70rpx; padding: 0 22rpx; border-radius: 13rpx; font-size: 23rpx; }
   .summary-grid { gap: 12rpx; }.summary-card { padding: 20rpx 14rpx; border-radius: 18rpx; }.summary-value { font-size: 34rpx; }.summary-label { font-size: 20rpx; }
-  .filter-panel { padding: 18rpx; flex-wrap: wrap; gap: 14rpx; border-radius: 19rpx; }.search-box { width: 100%; flex-basis: 100%; height: 70rpx; }.search-input { font-size: 23rpx; }.filter-picker { height: 70rpx; min-width: 210rpx; font-size: 22rpx; }.log-list { grid-template-columns: 1fr; gap: 16rpx; }.log-card { padding: 24rpx; border-radius: 20rpx; }.user-avatar { width: 66rpx; height: 66rpx; border-radius: 17rpx; }.log-action { font-size: 27rpx; }.log-user,.module-tag { font-size: 20rpx; }.log-detail { font-size: 22rpx; }.log-meta { font-size: 19rpx; }
+  .filter-panel { padding: 18rpx; flex-wrap: wrap; gap: 14rpx; border-radius: 19rpx; }.search-box { width: 100%; flex-basis: 100%; height: 70rpx; }.search-input { font-size: 23rpx; }.filter-picker { height: 70rpx; min-width: 210rpx; font-size: 22rpx; }.log-table { border-radius: 20rpx; }.log-table-head { display: none; }.log-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8rpx; padding: 24rpx; }.log-action { font-size: 27rpx; }.module-tag,.log-detail,.log-user-cell,.log-time,.log-ip { font-size: 20rpx; }.log-detail { white-space: normal; }
 }
 </style>
