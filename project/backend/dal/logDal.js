@@ -42,6 +42,13 @@ const ACTION_META_MAP = {
   [C.ACTION_ADMIN_DELETE_DEPARTMENT]: { module: '组织管理', label: '删除部门' },
   [C.ACTION_ADMIN_EXPORT_ENTERPRISES]: { module: '企业档案', label: '导出企业数据' },
   [C.ACTION_ADMIN_UPDATE_ENTERPRISE_PROFILE]: { module: '企业档案', label: '更新企业档案' },
+  [C.ACTION_ADMIN_ADD_KNOWLEDGE]: { module: '知识库管理', label: '新增知识文档' },
+  [C.ACTION_ADMIN_UPDATE_KNOWLEDGE]: { module: '知识库管理', label: '更新知识文档' },
+  [C.ACTION_ADMIN_ARCHIVE_KNOWLEDGE]: { module: '知识库管理', label: '归档知识文档' },
+  [C.ACTION_ADMIN_BATCH_ARCHIVE_KNOWLEDGE]: { module: '知识库管理', label: '批量归档知识文档' },
+  [C.ACTION_ADMIN_ADD_KNOWLEDGE_CATEGORY]: { module: '知识分类', label: '新增知识分类' },
+  [C.ACTION_ADMIN_UPDATE_KNOWLEDGE_CATEGORY]: { module: '知识分类', label: '更新知识分类' },
+  [C.ACTION_ADMIN_DELETE_KNOWLEDGE_CATEGORY]: { module: '知识分类', label: '删除知识分类' },
   [C.ACTION_ADMIN_ADD_REPORT_TEMPLATE]: { module: '报告模板', label: '新增报告模板' },
   [C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE]: { module: '报告模板', label: '更新报告模板' },
   [C.ACTION_ADMIN_DELETE_REPORT_TEMPLATE]: { module: '报告模板', label: '删除报告模板' },
@@ -68,6 +75,9 @@ const DETAIL_LABEL_MAP = {
   hasImage: '包含图片',
   is_default: '默认模板',
   replaced_file: '替换文件',
+  title: '文档标题',
+  category_name: '分类名称',
+  archived_count: '归档数量',
 }
 
 /** 解析数据库中的 JSON 详情 */
@@ -150,6 +160,20 @@ const formatDetails = (actionCode, rawDetails) => {
       return `导出企业数据 ${formatDetailValue('count', details.count)} 条，文件：${formatDetailValue('file', details.file)}`
     case C.ACTION_ADMIN_UPDATE_ENTERPRISE_PROFILE:
       return `更新企业档案，企业 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_ADD_KNOWLEDGE:
+      return `新增知识文档，条目 ID：${formatDetailValue('id', details.id)}，标题：${formatDetailValue('title', details.title)}，分类：${formatDetailValue('category_name', details.category_name)}`
+    case C.ACTION_ADMIN_UPDATE_KNOWLEDGE:
+      return `更新知识文档，条目 ID：${formatDetailValue('id', details.id)}，标题：${formatDetailValue('title', details.title)}，替换文件：${formatDetailValue('replaced_file', details.replaced_file)}`
+    case C.ACTION_ADMIN_ARCHIVE_KNOWLEDGE:
+      return `归档知识文档，条目 ID：${formatDetailValue('id', details.id)}，标题：${formatDetailValue('title', details.title)}`
+    case C.ACTION_ADMIN_BATCH_ARCHIVE_KNOWLEDGE:
+      return `批量归档知识文档，数量：${formatDetailValue('archived_count', details.archived_count)}`
+    case C.ACTION_ADMIN_ADD_KNOWLEDGE_CATEGORY:
+      return `新增知识分类，分类 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_UPDATE_KNOWLEDGE_CATEGORY:
+      return `更新知识分类，分类 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
+    case C.ACTION_ADMIN_DELETE_KNOWLEDGE_CATEGORY:
+      return `删除知识分类，分类 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}`
     case C.ACTION_ADMIN_ADD_REPORT_TEMPLATE:
       return `新增报告模板，模板 ID：${formatDetailValue('id', details.id)}，名称：${formatDetailValue('name', details.name)}，默认模板：${formatDetailValue('is_default', details.is_default)}`
     case C.ACTION_ADMIN_UPDATE_REPORT_TEMPLATE:
