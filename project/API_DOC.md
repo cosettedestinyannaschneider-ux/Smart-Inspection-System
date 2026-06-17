@@ -425,7 +425,9 @@ Authorization: Bearer <access_token>
 | POST | `/api/admin/knowledge/list` | 知识库列表 |
 | POST | `/api/admin/knowledge/add` | 上传知识文件 |
 | POST | `/api/admin/knowledge/update` | 更新知识条目 |
+| POST | `/api/admin/knowledge/save` | 更新知识条目并可选替换文件 |
 | POST | `/api/admin/knowledge/delete` | 归档知识条目 |
+| POST | `/api/admin/knowledge/batch-delete` | 批量归档知识条目 |
 | POST | `/api/admin/knowledge/categories/*` | 分类 CRUD |
 
 ### 8.4 AI 模型配置
@@ -442,20 +444,29 @@ Authorization: Bearer <access_token>
 
 #### 8.4.1 第二阶段前端对接约定
 
-> 当前状态：知识库管理页面仍为后续联调项；AI 模型配置页面已切换为真实接口，并统一只展示脱敏密钥。
+> 当前状态：知识库管理页面已切换为真实接口；AI 模型配置页面已切换为真实接口，并统一只展示脱敏密钥。
 
 ##### 知识库接口参数
 
 | 接口 | 请求参数 | 前端说明 |
 |---|---|---|
 | `POST /api/admin/knowledge/list` | 无业务参数 | 页面初始化加载文档列表 |
-| `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`file`；替换文件时增加 `id`、`isUpdate=true` | 新增必须上传文件 |
+| `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`file` | 新增必须上传文件 |
 | `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id` | 编辑但不更换文件 |
-| `POST /api/admin/knowledge/delete` | `id` | 单条软删除 |
+| `POST /api/admin/knowledge/save` | Multipart：`id`、`title`、`description`、`category_id`、可选 `file` | 编辑并替换文件时使用 |
+| `POST /api/admin/knowledge/delete` | `id` | 单条归档，默认不物理删除文件 |
+| `POST /api/admin/knowledge/batch-delete` | `ids: number[]` | 批量归档已选知识文档 |
 | `POST /api/admin/knowledge/categories/list` | 无业务参数 | 页面初始化加载分类 |
 | `POST /api/admin/knowledge/categories/add` | `name`、`sort` | 新增分类 |
 | `POST /api/admin/knowledge/categories/update` | `id`、`name`、`sort` | 编辑分类 |
-| `POST /api/admin/knowledge/categories/delete` | `id` | 删除无关联文档的分类 |
+| `POST /api/admin/knowledge/categories/delete` | `id` | 删除无关联文档的分类；若仍有关联文档，后端明确拒绝 |
+
+知识库管理规则：
+
+- 仅允许上传 `PDF`、`DOC`、`DOCX`，单文件大小不超过 `20MB`
+- 知识文档统一存放到 `uploads/knowledge/` 子目录，数据库保存相对路径
+- 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
+- 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
 
 知识列表页面需要的返回字段：
 
@@ -466,10 +477,13 @@ Authorization: Bearer <access_token>
   "description": "2021年修订版",
   "category_id": 1,
   "category_name": "煤矿安全",
-  "file_path": "uploads/knowledge/example.pdf",
-  "file_type": "pdf",
+  "file_path": "knowledge/1718527000000-123456789.pdf",
+  "file_name": "1718527000000-123456789.pdf",
+  "file_type": "PDF",
+  "file_size": 245760,
   "status": "active",
-  "created_at": "2026-06-09"
+  "created_at": "2026-06-09T09:20:00.000Z",
+  "updated_at": "2026-06-17T10:00:00.000Z"
 }
 ```
 

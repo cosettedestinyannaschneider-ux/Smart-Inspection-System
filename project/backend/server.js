@@ -16,7 +16,6 @@ const reportTemplateService = require('./bll/reportTemplateService')
 
 // ---- 数据访问层 ----
 const historyDal = require('./dal/historyDal')
-const knowledgeDal = require('./dal/knowledgeDal')
 const enterpriseDal = require('./dal/enterpriseDal')
 const logDal = require('./dal/logDal')
 const schemaInit = require('./dal/schemaInit')
@@ -25,7 +24,6 @@ const sessionDal = require('./dal/sessionDal')
 const departmentDal = require('./dal/departmentDal')
 const aiModelConfigDal = require('./dal/aiModelConfigDal')
 const inspectionReportImageDal = require('./dal/inspectionReportImageDal')
-const knowledgeCategoryDal = require('./dal/knowledgeCategoryDal')
 
 // ---- 公共模块 ----
 const { responseMiddleware } = require('./common/Result')
@@ -90,6 +88,7 @@ app.use('/uploads', (req, res, next) => {
 for (const dir of [
   C.UPLOAD_DIR,
   path.join(C.UPLOAD_DIR, C.HAZARD_UPLOAD_SUBDIR),
+  path.join(C.UPLOAD_DIR, C.KNOWLEDGE_UPLOAD_SUBDIR),
   path.join(C.UPLOAD_DIR, C.REPORT_TEMPLATE_UPLOAD_SUBDIR),
 ]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
@@ -124,6 +123,23 @@ const reportTemplateUpload = multer({
   },
 })
 
+const knowledgeUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(C.UPLOAD_DIR, C.KNOWLEDGE_UPLOAD_SUBDIR)),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`),
+  }),
+  limits: {
+    fileSize: C.MAX_DOCUMENT_UPLOAD_SIZE,
+  },
+  fileFilter: (req, file, cb) => {
+    if (!C.ALLOWED_DOC_TYPES.test(String(file.originalname || ''))) {
+      cb(new Error('仅支持上传 PDF、DOC 或 DOCX 文件'))
+      return
+    }
+    cb(null, true)
+  },
+})
+
 // 初始化数据库
 /** 包装模板上传中间件，统一处理文件格式与缺失错误 */
 const useReportTemplateUpload = (fieldName) => (req, res, next) => {
@@ -134,6 +150,28 @@ const useReportTemplateUpload = (fieldName) => (req, res, next) => {
     }
     return res.fail(ErrorCode.FILE_REQUIRED, error.message || '模板文件上传失败')
   })
+}
+
+/** 包装知识库上传中间件，统一处理文件格式和大小限制 */
+const useKnowledgeUpload = (fieldName) => (req, res, next) => {
+  knowledgeUpload.single(fieldName)(req, res, (error) => {
+    if (!error) return next()
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.fail(ErrorCode.PARAM_INVALID, '知识库文件不能超过 20MB')
+    }
+    if (String(error.message || '').includes('PDF') || String(error.message || '').includes('DOC')) {
+      return res.fail(ErrorCode.FILE_FORMAT_INVALID, error.message)
+    }
+    return res.fail(ErrorCode.FILE_REQUIRED, error.message || '知识库文件上传失败')
+  })
+}
+
+/** 统一映射知识库业务异常返回码 */
+const resolveKnowledgeErrorCode = (error) => {
+  if (!error?.isKnowledgeError) return ErrorCode.INTERNAL_ERROR
+  if (String(error.message || '').includes('请上传知识库文件')) return ErrorCode.FILE_REQUIRED
+  if (String(error.message || '').includes('仅支持上传')) return ErrorCode.FILE_FORMAT_INVALID
+  return ErrorCode.PARAM_INVALID
 }
 
 schemaInit.init().catch(err => console.error('[Server] Schema init failed:', err))
@@ -672,19 +710,19 @@ app.post('/api/history/delete', requireAuth, requirePermission('report:download'
 // =========================================================================
 app.get('/api/knowledge/list', requireAuth, requirePermission('knowledge:view'), async (req, res) => {
   try {
-    const list = await knowledgeService.getAllKnowledge()
+    const list = await knowledgeService.listForClient()
     res.success(list)
   } catch (err) {
-    res.fail(ErrorCode.DATABASE_ERROR)
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
   }
 })
 
 app.get('/api/knowledge/categories/list', requireAuth, requirePermission('knowledge:view'), async (req, res) => {
   try {
-    const list = await knowledgeCategoryDal.findAll()
+    const list = await knowledgeService.listCategories()
     res.success(list)
   } catch (err) {
-    res.fail(ErrorCode.DATABASE_ERROR)
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
   }
 })
 
@@ -705,77 +743,126 @@ app.get('/api/history', requireAuth, requirePermission('report:download'), async
 // 管理员：知识库管理
 // =========================================================================
 app.post('/api/admin/knowledge/list', adminAuth, async (req, res) => {
-  try { res.success(await knowledgeService.getAllKnowledge()) }
-  catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+  try {
+    res.success(await knowledgeService.listForAdmin())
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/categories/list', adminAuth, async (req, res) => {
-  try { res.success(await knowledgeCategoryDal.findAll()) }
-  catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+  try {
+    res.success(await knowledgeService.listCategories())
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/categories/add', adminAuth, async (req, res) => {
-  const name = String(req.body.name || '').trim()
-  if (!name) return res.fail(ErrorCode.PARAM_MISSING, '缺少分类名称')
   try {
-    await knowledgeCategoryDal.create(name, Number(req.body.sort || 0) || 0)
-    res.success(null, '已添加')
-  } catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+    const created = await knowledgeService.createCategory(req.body)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ADD_KNOWLEDGE_CATEGORY, {
+      id: Number(created.id),
+      name: created.name,
+    }, req.ip)
+    res.success(created, '已添加')
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/categories/update', adminAuth, async (req, res) => {
-  const id = Number(req.body.id)
-  const name = String(req.body.name || '').trim()
-  if (!id || !name) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await knowledgeCategoryDal.updateById(id, name, Number(req.body.sort || 0) || 0)
-    res.success(null, '已更新')
-  } catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+    const updated = await knowledgeService.updateCategory(req.body)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_KNOWLEDGE_CATEGORY, {
+      id: Number(updated.id),
+      name: updated.name,
+    }, req.ip)
+    res.success(updated, '已更新')
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/categories/delete', adminAuth, async (req, res) => {
-  if (!Number(req.body.id)) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await knowledgeCategoryDal.deleteById(Number(req.body.id))
+    const deleted = await knowledgeService.deleteCategory(req.body.id)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_DELETE_KNOWLEDGE_CATEGORY, {
+      id: Number(deleted.id),
+      name: deleted.name,
+    }, req.ip)
     res.success(null, '已删除')
-  } catch (err) { res.fail(ErrorCode.DATABASE_ERROR) }
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
 })
 
-app.post('/api/admin/knowledge/add', adminAuth, upload.single('file'), async (req, res) => {
+app.post('/api/admin/knowledge/add', adminAuth, useKnowledgeUpload('file'), async (req, res) => {
   try {
-    const { id, title, description, isUpdate, category_id } = req.body
-    const filePath = req.file ? req.file.path.replace(/\\/g, '/') : null
-    const categoryId = category_id ? Number(category_id) : null
-
-    if (isUpdate === 'true' && id) {
-      await knowledgeDal.update(id, title, description, filePath, categoryId)
-      return res.success(null, '知识条目已更新')
-    }
-
-    if (!filePath) return res.fail(ErrorCode.FILE_REQUIRED)
-    await knowledgeDal.create(title, filePath, description, categoryId, {
-      fileSize: req.file ? req.file.size : null,
-      fileType: req.file ? path.extname(req.file.originalname).replace('.', '') : null,
-    })
-    res.success(null, '知识条目已添加')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR, err.message) }
+    const created = await knowledgeService.create(req.body, req.file)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ADD_KNOWLEDGE, {
+      id: created.id,
+      title: created.title,
+      category_name: created.category_name || '未分类',
+    }, req.ip)
+    res.success(created, '知识条目已添加')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/delete', adminAuth, async (req, res) => {
-  if (!req.body.id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await knowledgeDal.delete(req.body.id)
+    const archived = await knowledgeService.archive(req.body.id)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ARCHIVE_KNOWLEDGE, {
+      id: Number(archived.id),
+      title: archived.title,
+    }, req.ip)
     res.success(null, '知识条目已归档')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
 })
 
 app.post('/api/admin/knowledge/update', adminAuth, async (req, res) => {
-  const { id, title, description, category_id } = req.body
-  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
   try {
-    await knowledgeDal.update(id, title, description, null, category_id ? Number(category_id) : null)
-    res.success(null, '知识条目已更新')
-  } catch (err) { res.fail(ErrorCode.INTERNAL_ERROR) }
+    const updated = await knowledgeService.update(req.body)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_KNOWLEDGE, {
+      id: updated.id,
+      title: updated.title,
+      replaced_file: false,
+    }, req.ip)
+    res.success(updated, '知识条目已更新')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/save', adminAuth, useKnowledgeUpload('file'), async (req, res) => {
+  try {
+    const updated = await knowledgeService.update(req.body, req.file || null)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_KNOWLEDGE, {
+      id: updated.id,
+      title: updated.title,
+      replaced_file: !!req.file,
+    }, req.ip)
+    res.success(updated, '知识条目已更新')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/batch-delete', adminAuth, async (req, res) => {
+  try {
+    const archivedList = await knowledgeService.batchArchive(req.body.ids)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_BATCH_ARCHIVE_KNOWLEDGE, {
+      archived_count: archivedList.length,
+      ids: archivedList.map((item) => item.id),
+    }, req.ip)
+    res.success({ archived_ids: archivedList.map((item) => item.id) }, '知识条目已批量归档')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
 })
 
 app.post('/api/admin/history', adminAuth, async (req, res) => {
