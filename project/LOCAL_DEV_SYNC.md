@@ -92,3 +92,13 @@ git -C E:\University\Project\project1.0 pull teamrepo main
 - 后台已经添加并启用的 AI 模型配置
 
 除非明确需要验证全新部署，否则不再删库重建。
+
+## 8. PR8 手动备份配置
+
+数据备份页的真实手动备份依赖本机 `mysqldump`。合并 PR8 后不需要重建数据库，但需要在本地 `project/backend/.env` 中补充：
+
+```env
+MYSQLDUMP_BIN=C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe
+```
+
+如果该路径和本机安装位置不同，请改成实际的 `mysqldump.exe` 绝对路径。未配置时，管理端备份页会明确显示“手动备份不可用”，不会创建伪备份记录。

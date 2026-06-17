@@ -13,6 +13,7 @@ const knowledgeService = require('./bll/knowledgeService')
 const modelConfigService = require('./bll/modelConfigService')
 const adminWorkbenchService = require('./bll/adminWorkbenchService')
 const reportTemplateService = require('./bll/reportTemplateService')
+const backupService = require('./bll/backupService')
 
 // ---- 数据访问层 ----
 const historyDal = require('./dal/historyDal')
@@ -90,6 +91,7 @@ for (const dir of [
   path.join(C.UPLOAD_DIR, C.HAZARD_UPLOAD_SUBDIR),
   path.join(C.UPLOAD_DIR, C.KNOWLEDGE_UPLOAD_SUBDIR),
   path.join(C.UPLOAD_DIR, C.REPORT_TEMPLATE_UPLOAD_SUBDIR),
+  path.join(C.UPLOAD_DIR, C.BACKUP_UPLOAD_SUBDIR),
 ]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
@@ -239,6 +241,17 @@ const mapTemplateRecordForClient = (req, record) => ({
   ...record,
   download_url: record?.has_file ? buildAdminTemplateDownloadUrl(req, record.id) : null,
 })
+
+/** 生成管理员数据库备份的受控下载链接 */
+const buildAdminBackupDownloadUrl = (req, backupId) => buildFileUrl(
+  `/api/admin/backup/${backupId}/file`,
+  authService.createFileAccessToken({
+    userId: getAuthUserId(req),
+    jti: req.auth.jti,
+    resourceType: 'admin-database-backup',
+    resourceId: backupId,
+  })
+)
 
 /** 尝试读取 Bearer Token 或文件访问票据 */
 const resolveFileRequestAuth = async (req, expected) => {
@@ -1160,6 +1173,66 @@ app.post('/api/admin/logs/list', adminAuth, async (req, res) => {
   } catch (err) {
     console.error('[Server] admin logs list error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+// =========================================================================
+// 管理员：数据库备份真实手动流程
+// =========================================================================
+app.post('/api/admin/backup/status', adminAuth, async (req, res) => {
+  try {
+    res.success({ data: backupService.getStatus() })
+  } catch (err) {
+    console.error('[Server] admin backup status error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/backup/records', adminAuth, async (req, res) => {
+  try {
+    const records = await backupService.listRecords((record) => buildAdminBackupDownloadUrl(req, record.id))
+    res.success({ data: records })
+  } catch (err) {
+    console.error('[Server] admin backup records error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/backup/create', adminAuth, async (req, res) => {
+  try {
+    const created = await backupService.createManualBackup({ userId: getAuthUserId(req) })
+    const record = {
+      ...created,
+      download_url: created?.has_file ? buildAdminBackupDownloadUrl(req, created.id) : null,
+    }
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_CREATE_BACKUP, {
+      id: record.id,
+      file_name: record.file_name,
+      file_size: record.file_size,
+    }, req.ip)
+    res.success({ data: record }, '数据库备份已完成')
+  } catch (err) {
+    console.error('[Server] admin backup create error:', err)
+    res.fail(err.isBackupError ? ErrorCode.PARAM_INVALID : ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.get('/api/admin/backup/:backup_id/file', async (req, res) => {
+  const backupId = Number(req.params.backup_id)
+  if (!backupId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const auth = await resolveFileRequestAuth(req, {
+      resourceType: 'admin-database-backup',
+      resourceId: backupId,
+    })
+    if (auth.user.role !== C.ROLE_ADMIN) {
+      return res.fail(ErrorCode.ADMIN_REQUIRED, '仅限管理员操作')
+    }
+
+    const { record, absolutePath } = await backupService.getDownloadFile(backupId)
+    return res.download(absolutePath, record.file_name)
+  } catch (err) {
+    res.fail(err.isBackupError ? ErrorCode.PARAM_INVALID : ErrorCode.UNAUTHORIZED, err.message)
   }
 })
 

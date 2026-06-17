@@ -737,10 +737,37 @@ Authorization: Bearer <access_token>
 
 | 方法 | URL | 说明 |
 |---|---|---|
+| POST | `/api/admin/backup/status` | 获取手动备份能力状态 |
 | POST | `/api/admin/backup/create` | 创建手动数据库备份 |
 | POST | `/api/admin/backup/records` | 获取备份记录 |
-| POST | `/api/admin/backup/policy/get` | 获取自动备份策略 |
-| POST | `/api/admin/backup/policy/update` | 更新自动备份周期 |
+| GET | `/api/admin/backup/:backup_id/file` | 通过短期文件访问票据下载备份文件 |
+
+当前阶段只实现真实手动备份。自动备份策略保留为规划能力，前端不再提供可保存的伪配置。
+
+`POST /api/admin/backup/status` 返回示例：
+
+```json
+{
+  "available": true,
+  "reason": "",
+  "backup_dir": "uploads/backups",
+  "automatic_policy": {
+    "enabled": false,
+    "label": "规划中"
+  }
+}
+```
+
+`POST /api/admin/backup/records` 返回字段：
+
+- `id`：备份记录 ID
+- `file_name`：备份文件名
+- `file_size`：文件大小，单位字节
+- `backup_type`：`manual` 或 `automatic`
+- `status`：`pending`、`running`、`completed`、`failed`
+- `error_message`：失败原因
+- `has_file`：本地备份文件是否仍存在
+- `download_url`：管理员受控下载地址，只有成功且文件存在时返回
 
 ## 后端阶段 B 已实现接口（2026-06-09）
 
