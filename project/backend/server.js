@@ -25,6 +25,7 @@ const sessionDal = require('./dal/sessionDal')
 const departmentDal = require('./dal/departmentDal')
 const aiModelConfigDal = require('./dal/aiModelConfigDal')
 const inspectionReportImageDal = require('./dal/inspectionReportImageDal')
+const inspectionReportKnowledgeRefDal = require('./dal/inspectionReportKnowledgeRefDal')
 
 // ---- 公共模块 ----
 const { responseMiddleware } = require('./common/Result')
@@ -270,12 +271,32 @@ const resolveFileRequestAuth = async (req, expected) => {
   return await authService.authenticateFileAccessToken(fileToken, expected)
 }
 
+/** 将报告引用依据快照映射为前端展示结构 */
+const mapKnowledgeRefsForClient = (refs = []) => refs.map((ref) => ({
+  id: Number(ref.id),
+  knowledge_clause_id: ref.knowledge_clause_id ? Number(ref.knowledge_clause_id) : null,
+  knowledge_id: ref.knowledge_id ? Number(ref.knowledge_id) : null,
+  source_title: ref.source_title || '',
+  source_code: ref.source_code || '',
+  clause_no: ref.clause_no || '',
+  content: ref.content || '',
+  match_keyword: ref.match_keyword || '',
+}))
+
 /** 将数据库记录中的文件路径转为当前接口应暴露的受控地址 */
-const mapHistoryRecordForClient = (req, record) => ({
+const mapHistoryRecordForClient = (req, record, knowledgeRefs = []) => ({
   ...record,
   image_path: record.image_path ? buildReportImagePreviewUrl(req, record.id) : null,
+  knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
   ...buildReportDownloadUrls(req, record.id, record.word_path, record.pdf_path),
 })
+
+/** 批量映射报告记录，并附带引用依据快照 */
+const mapHistoryRecordsForClient = async (req, records = []) => {
+  const reportIds = records.map((record) => Number(record.id)).filter((id) => id > 0)
+  const refMap = await inspectionReportKnowledgeRefDal.findByReportIds(reportIds)
+  return records.map((record) => mapHistoryRecordForClient(req, record, refMap.get(Number(record.id)) || []))
+}
 
 /** 安全发送本地上传文件 */
 const sendControlledUploadFile = (res, absolutePath) => {
@@ -499,7 +520,7 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       originalName: img.original_name || null,
     }))
 
-    const { result, sessionId: newSessionId } = await aiService.processHazardImagesInspection({
+    const { result, sessionId: newSessionId, knowledgeRefs = [] } = await aiService.processHazardImagesInspection({
       prompt, sessionId, enterprise, images: aiImages, userId, modelId,
     })
 
@@ -532,12 +553,17 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     })
 
     await inspectionReportImageDal.linkImages(historyId, imageIds)
-    await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, { count: images.length }, req.ip)
+    await inspectionReportKnowledgeRefDal.replaceByReportId(historyId, knowledgeRefs)
+    await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, {
+      count: images.length,
+      knowledge_ref_count: knowledgeRefs.length,
+    }, req.ip)
 
     res.success({
       result,
       sessionId: newSessionId,
       id: historyId,
+      knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
       ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
     })
   } catch (err) {
@@ -559,7 +585,7 @@ app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.
   try {
     console.log(`[Server] Processing: prompt=${prompt}, sessionId=${session_id}, isInspection=${isInspectionFlag}`)
     const modelId = model_id ? Number(model_id) : null
-    const { result, sessionId, businessScopeRefusal } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
+    const { result, sessionId, businessScopeRefusal, knowledgeRefs = [] } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
     console.log(`[Server] AI result length: ${result ? result.length : 0}`)
 
     if (businessScopeRefusal) {
@@ -584,12 +610,18 @@ app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.
       enterpriseId: enterprise ? enterprise.id : null,
       title: enterprise ? `${enterprise.name} - 隐患排查报告` : null,
     })
-    await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, hasImage: !!filePath }, req.ip)
+    await inspectionReportKnowledgeRefDal.replaceByReportId(historyId, knowledgeRefs)
+    await logDal.logAction(userId, C.ACTION_AI_INSPECTION, {
+      prompt,
+      hasImage: !!filePath,
+      knowledge_ref_count: knowledgeRefs.length,
+    }, req.ip)
 
     res.success({
       result,
       sessionId,
       id: historyId,
+      knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
       ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
     })
   } catch (err) {
@@ -624,7 +656,7 @@ app.get('/api/session/:session_id', requireAuth, async (req, res) => {
   try {
     const messages = await historyDal.findBySessionIdForUser(req.params.session_id, getAuthUserId(req))
     if (!messages.length) return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不存在')
-    const result = messages.map((m) => mapHistoryRecordForClient(req, m))
+    const result = await mapHistoryRecordsForClient(req, messages)
     res.success(result)
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
@@ -719,6 +751,7 @@ app.post('/api/history/delete', requireAuth, requirePermission('report:download'
     if (Number(record.user_id) !== userId) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限删除此记录')
 
     await inspectionReportImageDal.unlinkAll(id)
+    await inspectionReportKnowledgeRefDal.deleteByReportId(id)
     await historyDal.deleteById(userId, id)
 
     if (record.word_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.word_path), () => {})
@@ -759,7 +792,7 @@ app.get('/api/knowledge/categories/list', requireAuth, requirePermission('knowle
 app.get('/api/history', requireAuth, requirePermission('report:download'), async (req, res) => {
   try {
     const history = await historyDal.findByUserId(getAuthUserId(req))
-    res.success(history.map((item) => mapHistoryRecordForClient(req, item)))
+    res.success(await mapHistoryRecordsForClient(req, history))
   } catch (err) {
     console.error('[Server] history error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR)

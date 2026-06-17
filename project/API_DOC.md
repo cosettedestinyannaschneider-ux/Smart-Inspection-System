@@ -155,11 +155,13 @@
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String), `session_id` (String, 可选), `model_id` (Number, 可选), `file` (File, 可选)
-- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs }`
 
 > 业务范围：纯文本请求会进行安全生产业务范围保底判断。与安全检查、隐患分析、整改建议、法规标准、企业安全管理或报告生成无关的问题会返回业务范围提示，不生成 Word/PDF 报告。
 >
 > 模型能力：上传图片或进行隐患图片分析时，需要选择支持视觉/多模态输入的模型。若模型 API Key、API 地址、模型 ID 或图片能力异常，后端返回归一化错误提示，不暴露 API Key、请求头或供应商原始响应。
+>
+> 法规依据：隐患分析会基于用户描述、图片名称/标签和企业信息检索本地 `knowledge_clauses`，将命中的条款作为受控上下文注入模型，并把命中条款快照返回到 `knowledge_refs`。未命中本地条款时，AI 应返回“需人工复核具体条款”，不得编造法规编号或条款内容。
 
 ### 3.2 多图智能隐患分析
 - **URL**: `POST /api/hazard/analyze`
@@ -167,11 +169,27 @@
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选), `model_id` (Number, 可选)
-- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id }`
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs }`
 
 > 图片顺序：后端按 `image_ids` 的传入顺序读取图片，并要求 AI 结果中的 `image_id` 与该顺序一致，避免报告中的“图片 1/2/3”与用户选择顺序错位。
 >
-> 法规依据：当前知识库条款结构化已支持管理员上传后的条款管理，但本接口尚未把本地条款检索结果注入 AI 上下文。AI 不能高置信确认具体条款时，应返回“需人工复核具体条款”，避免编造法规编号或条款内容。
+> 法规依据：后端使用 MySQL LIKE 从 `knowledge_clauses` 检索本地条款，并要求模型仅引用命中的条款；分析结果保存后，命中条款快照写入 `inspection_report_knowledge_refs`，用于历史报告和企业档案回查。
+
+`knowledge_refs` 字段结构：
+
+```json
+[
+  {
+    "knowledge_clause_id": 1,
+    "knowledge_id": 2,
+    "source_title": "安全生产法",
+    "source_code": "",
+    "clause_no": "第三十六条",
+    "content": "生产经营单位应当...",
+    "match_keyword": "安全"
+  }
+]
+```
 
 ### 3.3 编辑保存分析结果
 - **URL**: `POST /api/history/update-result`
@@ -192,7 +210,7 @@
 ### 4.2 获取会话详情
 - **URL**: `GET /api/session/:session_id`
 - **请求头**: `Authorization: Bearer <access_token>`
-- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, ... }] }`
+- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, knowledge_refs, ... }] }`
 
 ### 4.3 删除会话
 - **URL**: `POST /api/session/delete`
@@ -244,7 +262,7 @@
 - **URL**: `GET /api/history`
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `report:download`
-- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, ... }] }`
+- **返回**: `{ code: 0, data: [{ id, prompt, result, image_path, wordPath, pdfPath, knowledge_refs, ... }] }`
 
 ### 6.3 受控文件访问
 
@@ -892,6 +910,11 @@ Authorization: Bearer <access_token>
   }]
 }
 ```
+
+报告列表补充字段：
+
+- `knowledge_ref_count`：该报告关联的本地知识条款数量
+- `knowledge_refs`：该报告前 3 条引用依据摘要，字段同 `knowledge_refs`
 
 ### 企业档案更新（扩展）
 

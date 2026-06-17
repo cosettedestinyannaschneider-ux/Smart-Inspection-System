@@ -292,7 +292,32 @@ CREATE TABLE knowledge_clauses (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识库条款表';
 
 -- ============================================================================
--- 13. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
+-- 13. 报告-知识条款引用表（报告依据可追溯）
+-- ============================================================================
+CREATE TABLE inspection_report_knowledge_refs (
+  id                  INT           NOT NULL AUTO_INCREMENT,
+  report_id           INT           NOT NULL COMMENT '所属排查报告',
+  knowledge_clause_id INT           DEFAULT NULL COMMENT '生成报告时命中的知识条款 ID',
+  knowledge_id        INT           DEFAULT NULL COMMENT '来源知识文档 ID',
+  source_title        VARCHAR(300)  NOT NULL COMMENT '来源文档标题快照',
+  source_code         VARCHAR(100)  DEFAULT NULL COMMENT '法规或标准编号快照',
+  clause_no           VARCHAR(100)  DEFAULT NULL COMMENT '条款号快照',
+  content             TEXT          NOT NULL COMMENT '条款内容快照',
+  match_keyword       VARCHAR(100)  DEFAULT NULL COMMENT '命中关键词',
+  sort                INT           NOT NULL DEFAULT 0 COMMENT '引用展示顺序',
+  created_at          TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_irk_report_id (report_id),
+  KEY idx_irk_clause_id (knowledge_clause_id),
+  KEY idx_irk_knowledge_id (knowledge_id),
+  KEY idx_irk_sort (sort),
+  CONSTRAINT fk_irk_report
+    FOREIGN KEY (report_id) REFERENCES inspection_reports (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='报告引用依据快照表';
+
+-- ============================================================================
+-- 14. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
 -- ============================================================================
 CREATE TABLE action_logs (
   id          INT           NOT NULL AUTO_INCREMENT,

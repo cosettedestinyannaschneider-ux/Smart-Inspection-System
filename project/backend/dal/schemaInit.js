@@ -28,6 +28,7 @@ const schemaInit = {
     await this.step08_knowledgeCategories()
     await this.step09_knowledge()
     await this.step09KnowledgeClauses()
+    await this.step09InspectionReportKnowledgeRefs()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
     await this.step12_reportTemplates()
@@ -537,6 +538,35 @@ const schemaInit = {
       'FOREIGN KEY (knowledge_id) REFERENCES knowledge (id) ON DELETE CASCADE ON UPDATE CASCADE')
     await this._addFK('knowledge_clauses', 'fk_kcl_category',
       'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+  },
+
+  // =========================================================================
+  // Step 9.6: 报告-知识条款引用表（保存 AI 报告引用依据快照）
+  // =========================================================================
+  async step09InspectionReportKnowledgeRefs() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS inspection_report_knowledge_refs (
+        id                  INT           NOT NULL AUTO_INCREMENT,
+        report_id           INT           NOT NULL,
+        knowledge_clause_id INT           DEFAULT NULL,
+        knowledge_id        INT           DEFAULT NULL,
+        source_title        VARCHAR(300)  NOT NULL,
+        source_code         VARCHAR(100)  DEFAULT NULL,
+        clause_no           VARCHAR(100)  DEFAULT NULL,
+        content             TEXT          NOT NULL,
+        match_keyword       VARCHAR(100)  DEFAULT NULL,
+        sort                INT           NOT NULL DEFAULT 0,
+        created_at          TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_irk_report_id (report_id),
+        KEY idx_irk_clause_id (knowledge_clause_id),
+        KEY idx_irk_knowledge_id (knowledge_id),
+        KEY idx_irk_sort (sort)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await this._addFK('inspection_report_knowledge_refs', 'fk_irk_report',
+      'FOREIGN KEY (report_id) REFERENCES inspection_reports (id) ON DELETE CASCADE ON UPDATE CASCADE')
   },
 
   // =========================================================================
