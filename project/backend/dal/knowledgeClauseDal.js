@@ -12,13 +12,25 @@ const knowledgeClauseDal = {
       for (const clause of clauses) {
         await connection.execute(
           `INSERT INTO knowledge_clauses
-            (knowledge_id, category_id, source_title, source_code, clause_no, content, keywords, sort, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (
+              knowledge_id, category_id, source_title, source_code, source_url,
+              issuing_authority, document_type, publish_date, effective_date,
+              current_status, verification_status, clause_no, content, keywords,
+              sort, status
+            )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             knowledgeId,
             clause.category_id || null,
             clause.source_title || '',
             clause.source_code || null,
+            clause.source_url || null,
+            clause.issuing_authority || null,
+            clause.document_type || null,
+            clause.publish_date || null,
+            clause.effective_date || null,
+            clause.current_status || '现行有效',
+            clause.verification_status || 'pending',
             clause.clause_no || null,
             clause.content || '',
             clause.keywords || null,
@@ -48,14 +60,42 @@ const knowledgeClauseDal = {
   },
 
   /** 同步知识文档元数据，避免只改标题或分类时条款来源仍显示旧值 */
-  async syncKnowledgeMetadata(knowledgeId, { categoryId = null, sourceTitle = '' } = {}) {
+  async syncKnowledgeMetadata(knowledgeId, {
+    categoryId = null,
+    sourceTitle = '',
+    source_code = null,
+    source_url = null,
+    issuing_authority = null,
+    document_type = null,
+    publish_date = null,
+    effective_date = null,
+    current_status = '现行有效',
+    verification_status = 'pending',
+  } = {}) {
     await db.execute(
       `UPDATE knowledge_clauses
-       SET category_id = ?, source_title = ?
+       SET category_id = ?,
+           source_title = ?,
+           source_code = ?,
+           source_url = ?,
+           issuing_authority = ?,
+           document_type = ?,
+           publish_date = ?,
+           effective_date = ?,
+           current_status = ?,
+           verification_status = ?
        WHERE knowledge_id = ? AND status = 'active'`,
       [
         categoryId || null,
         sourceTitle || '',
+        source_code || null,
+        source_url || null,
+        issuing_authority || null,
+        document_type || null,
+        publish_date || null,
+        effective_date || null,
+        current_status || '现行有效',
+        verification_status || 'pending',
         knowledgeId,
       ]
     )
@@ -135,16 +175,22 @@ const knowledgeClauseDal = {
       whereParts.push(`(
         source_title LIKE ?
         OR source_code LIKE ?
+        OR source_url LIKE ?
+        OR issuing_authority LIKE ?
+        OR document_type LIKE ?
         OR clause_no LIKE ?
         OR content LIKE ?
         OR keywords LIKE ?
       )`)
-      params.push(likeValue, likeValue, likeValue, likeValue, likeValue)
+      params.push(likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue)
     })
 
     const safeLimit = Math.max(1, Math.min(Number(limit) || 8, 20))
     const [rows] = await db.execute(
-      `SELECT id, knowledge_id, category_id, source_title, source_code, clause_no, content, keywords, sort
+      `SELECT
+         id, knowledge_id, category_id, source_title, source_code, source_url,
+         issuing_authority, document_type, publish_date, effective_date,
+         current_status, verification_status, clause_no, content, keywords, sort
        FROM knowledge_clauses
        WHERE status = 'active'
          AND (${whereParts.join(' OR ')})
@@ -157,6 +203,9 @@ const knowledgeClauseDal = {
       const haystack = [
         row.source_title,
         row.source_code,
+        row.source_url,
+        row.issuing_authority,
+        row.document_type,
         row.clause_no,
         row.content,
         row.keywords,

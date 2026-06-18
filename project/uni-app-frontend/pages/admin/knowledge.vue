@@ -78,8 +78,19 @@
           <view class="title-row">
             <text class="item-title">{{ item.title }}</text>
             <text class="category-tag">{{ getCategoryName(item.category_id) }}</text>
+            <text class="verify-tag" :class="verificationClass(item.verification_status)">
+              {{ verificationText(item.verification_status) }}
+            </text>
           </view>
           <text class="item-description">{{ item.description || '暂无文档说明' }}</text>
+          <view class="source-row">
+            <text>{{ item.document_type || '未标注文类' }}</text>
+            <text>{{ item.issuing_authority || '未标注发布机关' }}</text>
+            <text>{{ item.source_code || '未标注文号' }}</text>
+          </view>
+          <text v-if="item.applicable_category_names" class="applicable-line">
+            适用分类：{{ item.applicable_category_names }}
+          </text>
           <view class="meta-row">
             <text>{{ item.file_name || '未上传文件' }}</text>
             <text>{{ item.updated_at || item.created_at || '待更新' }}</text>
@@ -138,6 +149,62 @@
               <text v-if="isEdit && form.existingFileName && !form.selectedFileName" class="file-hint">
                 当前文件：{{ form.existingFileName }}
               </text>
+            </view>
+            <view class="form-section full">
+              <text class="section-title">官方来源信息</text>
+              <text class="section-description">用于后续报告依据追溯；未校验条文后续不会直接用于正式法规结论。</text>
+            </view>
+            <view class="form-item">
+              <text class="form-label">文号/标准号</text>
+              <input v-model="form.source_code" class="form-input" maxlength="100" placeholder="如 GB 50016-2014" />
+            </view>
+            <view class="form-item">
+              <text class="form-label">发布机关</text>
+              <input v-model="form.issuing_authority" class="form-input" maxlength="200" placeholder="如 应急管理部" />
+            </view>
+            <view class="form-item full">
+              <text class="form-label">官方来源 URL</text>
+              <input v-model="form.source_url" class="form-input" maxlength="1000" placeholder="请输入官方公开页面或数据库链接" />
+            </view>
+            <view class="form-item">
+              <text class="form-label">文件类型</text>
+              <picker :range="documentTypeOptions" @change="changeDocumentType">
+                <view class="form-picker">{{ form.document_type || '未选择' }} ▾</view>
+              </picker>
+            </view>
+            <view class="form-item">
+              <text class="form-label">现行状态</text>
+              <picker :range="currentStatusOptions" @change="changeCurrentStatus">
+                <view class="form-picker">{{ form.current_status || '现行有效' }} ▾</view>
+              </picker>
+            </view>
+            <view class="form-item">
+              <text class="form-label">发布日期</text>
+              <input v-model="form.publish_date" class="form-input" maxlength="10" placeholder="YYYY-MM-DD" />
+            </view>
+            <view class="form-item">
+              <text class="form-label">施行日期</text>
+              <input v-model="form.effective_date" class="form-input" maxlength="10" placeholder="YYYY-MM-DD" />
+            </view>
+            <view class="form-item">
+              <text class="form-label">人工校验状态</text>
+              <picker :range="verificationOptions" range-key="name" @change="changeVerificationStatus">
+                <view class="form-picker">{{ formVerificationText }} ▾</view>
+              </picker>
+            </view>
+            <view class="form-item full">
+              <text class="form-label">适用分类</text>
+              <view class="category-chip-grid">
+                <view
+                  v-for="category in categories"
+                  :key="category.id"
+                  class="category-chip"
+                  :class="{ active: isApplicableCategory(category.id), primary: Number(form.category_id) === Number(category.id) }"
+                  @click="toggleApplicableCategory(category.id)"
+                >
+                  {{ category.name }}
+                </view>
+              </view>
             </view>
           </view>
         </scroll-view>
@@ -199,11 +266,28 @@ const showKnowledgeModal = ref(false)
 const showCategoryModal = ref(false)
 const isEdit = ref(false)
 
+const documentTypeOptions = ['法律', '行政法规', '部门规章', '规范性文件', '国家标准', '行业标准', '地方标准', '团体标准', '其他']
+const currentStatusOptions = ['现行有效', '已废止', '已修订', '征求意见', '未知']
+const verificationOptions = [
+  { key: 'pending', name: '待校验' },
+  { key: 'verified', name: '已校验' },
+  { key: 'rejected', name: '不采用' },
+]
+
 const createKnowledgeForm = () => ({
   id: null,
   title: '',
   description: '',
   category_id: null,
+  applicable_category_ids: [],
+  source_code: '',
+  source_url: '',
+  issuing_authority: '',
+  document_type: '',
+  publish_date: '',
+  effective_date: '',
+  current_status: '现行有效',
+  verification_status: 'pending',
   existingFileName: '',
   selectedFile: null,
   selectedFileName: '',
@@ -237,6 +321,10 @@ const formCategoryName = computed(() => (
   categoryPickerOptions.value.find((item) => Number(item.id) === Number(form.value.category_id || 0))?.name || '未分类'
 ))
 
+const formVerificationText = computed(() => (
+  verificationOptions.find((item) => item.key === form.value.verification_status)?.name || '待校验'
+))
+
 const currentFileLabel = computed(() => {
   if (form.value.selectedFileName) return form.value.selectedFileName
   if (form.value.existingFileName) return form.value.existingFileName
@@ -246,12 +334,20 @@ const currentFileLabel = computed(() => {
 const filteredList = computed(() => {
   const searchText = keyword.value.trim().toLowerCase()
   return list.value.filter((item) => {
-    const categoryMatched = activeCategoryId.value === 'all' || Number(item.category_id || 0) === Number(activeCategoryId.value)
+    const targetCategoryId = Number(activeCategoryId.value)
+    const categoryMatched = activeCategoryId.value === 'all'
+      || Number(item.category_id || 0) === targetCategoryId
+      || item.applicable_category_ids.includes(targetCategoryId)
     const keywordMatched = !searchText || [
       item.title,
       item.description,
       item.file_name,
       item.category_name,
+      item.applicable_category_names,
+      item.source_code,
+      item.source_url,
+      item.issuing_authority,
+      item.document_type,
     ].some((value) => String(value || '').toLowerCase().includes(searchText))
     return categoryMatched && keywordMatched
   })
@@ -288,6 +384,16 @@ const parseUploadResponse = (response) => {
 const normalizeKnowledgeItem = (item = {}) => ({
   ...item,
   category_id: item.category_id ? Number(item.category_id) : null,
+  applicable_category_ids: normalizeCategoryIds(item.applicable_category_ids),
+  applicable_category_names: String(item.applicable_category_names || '').trim(),
+  source_code: String(item.source_code || '').trim(),
+  source_url: String(item.source_url || '').trim(),
+  issuing_authority: String(item.issuing_authority || '').trim(),
+  document_type: String(item.document_type || '').trim(),
+  publish_date: normalizeDateText(item.publish_date),
+  effective_date: normalizeDateText(item.effective_date),
+  current_status: String(item.current_status || '现行有效').trim(),
+  verification_status: String(item.verification_status || 'pending').trim(),
   file_name: String(item.file_name || item.file_path || '').trim(),
   file_type: String(item.file_type || '').toUpperCase(),
   clause_count: Number(item.clause_count || 0) || 0,
@@ -302,6 +408,18 @@ const normalizeCategory = (item = {}) => ({
 })
 
 const isDocFileName = (name) => /\.(pdf|doc|docx)$/i.test(String(name || '').trim())
+
+const normalizeCategoryIds = (value) => {
+  const raw = Array.isArray(value) ? value : String(value || '').split(',')
+  return Array.from(new Set(
+    raw.map((item) => Number(item || 0)).filter((item) => item > 0)
+  ))
+}
+
+const normalizeDateText = (value) => {
+  if (!value) return ''
+  return String(value).slice(0, 10)
+}
 
 const applySelectedFile = (file, customName = '') => {
   const fileName = String(customName || file?.name || file?.originalFile?.name || '').trim()
@@ -347,6 +465,17 @@ const getCategoryName = (categoryId) => (
   categories.value.find((item) => Number(item.id) === Number(categoryId))?.name || '未分类'
 )
 
+const verificationText = (status) => {
+  const map = {
+    pending: '待校验',
+    verified: '已校验',
+    rejected: '不采用',
+  }
+  return map[String(status || 'pending')] || '待校验'
+}
+
+const verificationClass = (status) => `verify-${String(status || 'pending')}`
+
 const parseStatusText = (status) => {
   const map = {
     parsed: '已解析',
@@ -362,7 +491,10 @@ const parseStatusClass = (status) => `status-${String(status || 'pending')}`
 const categoryCount = (categoryId) => (
   categoryId === 'all'
     ? list.value.length
-    : list.value.filter((item) => Number(item.category_id || 0) === Number(categoryId)).length
+    : list.value.filter((item) => (
+      Number(item.category_id || 0) === Number(categoryId)
+      || item.applicable_category_ids.includes(Number(categoryId))
+    )).length
 )
 
 const isSelected = (id) => selectedIds.value.includes(id)
@@ -395,6 +527,15 @@ const openEdit = (item) => {
     title: item.title,
     description: item.description || '',
     category_id: item.category_id || null,
+    applicable_category_ids: normalizeCategoryIds(item.applicable_category_ids),
+    source_code: item.source_code || '',
+    source_url: item.source_url || '',
+    issuing_authority: item.issuing_authority || '',
+    document_type: item.document_type || '',
+    publish_date: item.publish_date || '',
+    effective_date: item.effective_date || '',
+    current_status: item.current_status || '现行有效',
+    verification_status: item.verification_status || 'pending',
     existingFileName: item.file_name || '',
     selectedFile: null,
     selectedFileName: '',
@@ -417,6 +558,40 @@ const closeCategoryModal = () => {
 const changeFormCategory = (event) => {
   const option = categoryPickerOptions.value[event.detail.value]
   form.value.category_id = option && Number(option.id) > 0 ? Number(option.id) : null
+  if (form.value.category_id && !form.value.applicable_category_ids.includes(Number(form.value.category_id))) {
+    form.value.applicable_category_ids.push(Number(form.value.category_id))
+  }
+}
+
+const changeDocumentType = (event) => {
+  form.value.document_type = documentTypeOptions[event.detail.value] || ''
+}
+
+const changeCurrentStatus = (event) => {
+  form.value.current_status = currentStatusOptions[event.detail.value] || '现行有效'
+}
+
+const changeVerificationStatus = (event) => {
+  form.value.verification_status = verificationOptions[event.detail.value]?.key || 'pending'
+}
+
+const isApplicableCategory = (categoryId) => (
+  form.value.applicable_category_ids.includes(Number(categoryId))
+)
+
+const toggleApplicableCategory = (categoryId) => {
+  const id = Number(categoryId)
+  if (!id) return
+  const index = form.value.applicable_category_ids.indexOf(id)
+  if (index >= 0) {
+    if (Number(form.value.category_id) === id) {
+      showMessage('主分类必须保留为适用分类')
+      return
+    }
+    form.value.applicable_category_ids.splice(index, 1)
+  } else {
+    form.value.applicable_category_ids.push(id)
+  }
 }
 
 const pickFile = () => {
@@ -451,8 +626,21 @@ const buildKnowledgePayload = () => {
   const payload = {
     title: String(form.value.title || '').trim(),
     description: String(form.value.description || '').trim(),
+    source_code: String(form.value.source_code || '').trim(),
+    source_url: String(form.value.source_url || '').trim(),
+    issuing_authority: String(form.value.issuing_authority || '').trim(),
+    document_type: String(form.value.document_type || '').trim(),
+    publish_date: String(form.value.publish_date || '').trim(),
+    effective_date: String(form.value.effective_date || '').trim(),
+    current_status: String(form.value.current_status || '现行有效').trim(),
+    verification_status: String(form.value.verification_status || 'pending').trim(),
   }
   if (form.value.category_id) payload.category_id = String(form.value.category_id)
+  const applicableCategoryIds = Array.from(new Set([
+    form.value.category_id,
+    ...form.value.applicable_category_ids,
+  ].filter(Boolean).map(Number)))
+  if (applicableCategoryIds.length) payload.applicable_category_ids = JSON.stringify(applicableCategoryIds)
   if (isEdit.value && form.value.id) payload.id = String(form.value.id)
   return payload
 }
@@ -460,7 +648,7 @@ const buildKnowledgePayload = () => {
 const uploadKnowledgeForH5 = async (path, payload, file) => {
   const body = new FormData()
   Object.entries(payload).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') body.append(key, value)
+    if (value !== undefined && value !== null) body.append(key, value)
   })
   body.append('file', file)
 
@@ -910,12 +1098,57 @@ const deleteCategory = (category) => {
   font-size: 10px;
 }
 
+.verify-tag {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+}
+
+.verify-pending {
+  background: #fff7e8;
+  color: #b86b00;
+}
+
+.verify-verified {
+  background: #e8f8f1;
+  color: #188b5b;
+}
+
+.verify-rejected {
+  background: #fff1f0;
+  color: #d94b4b;
+}
+
 .item-description {
   display: block;
   margin-top: 6px;
   color: #79879a;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.source-row {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #657287;
+  font-size: 10px;
+}
+
+.source-row text {
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: #f4f7fb;
+}
+
+.applicable-line {
+  display: block;
+  margin-top: 6px;
+  color: #7f8ca0;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .meta-row {
@@ -1088,6 +1321,30 @@ const deleteCategory = (category) => {
   grid-column: 1 / -1;
 }
 
+.form-section {
+  padding-top: 6px;
+  border-top: 1px solid #edf1f7;
+}
+
+.form-section.full {
+  grid-column: 1 / -1;
+}
+
+.section-title {
+  display: block;
+  color: #25344f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.section-description {
+  display: block;
+  margin-top: 5px;
+  color: #8d99aa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .form-label {
   display: block;
   margin-bottom: 8px;
@@ -1153,6 +1410,33 @@ const deleteCategory = (category) => {
   margin-top: 8px;
   color: #8f9caf;
   font-size: 12px;
+}
+
+.category-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.category-chip {
+  padding: 7px 10px;
+  border: 1px solid #e2e9f2;
+  border-radius: 18px;
+  background: #f9fbfd;
+  color: #69778c;
+  font-size: 11px;
+}
+
+.category-chip.active {
+  border-color: #b9d8ff;
+  background: #eaf4ff;
+  color: #1677ff;
+}
+
+.category-chip.primary {
+  border-color: #18a66c;
+  background: #e8f8f1;
+  color: #188b5b;
 }
 
 .category-form {

@@ -1,5 +1,6 @@
 const db = require('./db')
 const { hasModelConfigSecret, encryptApiKey } = require('../bll/modelConfigCryptoService')
+const { LEGAL_KNOWLEDGE_CATEGORIES } = require('../common/legalKnowledgeTaxonomy')
 
 /**
  * 数据库结构初始化与迁移模块
@@ -27,6 +28,7 @@ const schemaInit = {
     await this.step06_inspectionReportImages()
     await this.step08_knowledgeCategories()
     await this.step09_knowledge()
+    await this.step09KnowledgeCategoryRelations()
     await this.step09KnowledgeClauses()
     await this.step09InspectionReportKnowledgeRefs()
     await this.step10_actionLogs()
@@ -456,17 +458,26 @@ const schemaInit = {
       await this._addColumn('knowledge_categories', colDef)
     }
 
-    // 种子数据
-    const categories = [
-      '煤矿安全', '非煤矿山安全', '危险化学品与化工安全', '建筑施工安全',
-      '消防安全', '特种设备安全', '交通运输安全', '工贸行业安全',
-      '电力安全', '石油天然气安全', '农林牧渔安全', '职业健康与劳动安全',
-      '应急与事故管理', '其他专项安全', '安全生产隐患排查报告'
-    ]
-    for (let i = 0; i < categories.length; i++) {
-      try { await db.execute('INSERT IGNORE INTO knowledge_categories (name, sort) VALUES (?, ?)', [categories[i], i + 1]) }
-      catch (e) { /* 忽略 */ }
+    // 固定 14 类法规分类；旧“安全生产隐患排查报告”不再作为法规分类种子。
+    for (const category of LEGAL_KNOWLEDGE_CATEGORIES) {
+      try {
+        await db.execute(
+          `INSERT INTO knowledge_categories (name, description, sort)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE description = VALUES(description), sort = VALUES(sort)`,
+          [category.name, category.description, category.sort]
+        )
+      } catch (e) { /* 忽略 */ }
     }
+
+    // 历史兼容分类只标记为归档用途，不删除已有数据，避免破坏旧知识文档外键。
+    try {
+      await db.execute(
+        `UPDATE knowledge_categories
+         SET description = '历史兼容分类，不再作为法规条文分类使用', sort = 999
+         WHERE name = '安全生产隐患排查报告'`
+      )
+    } catch (e) { /* 忽略 */ }
   },
 
   // =========================================================================
@@ -490,6 +501,14 @@ const schemaInit = {
     for (const colDef of [
       'file_size BIGINT UNSIGNED DEFAULT NULL',
       'file_type VARCHAR(20) DEFAULT NULL',
+      'source_code VARCHAR(100) DEFAULT NULL',
+      'source_url VARCHAR(1000) DEFAULT NULL',
+      'issuing_authority VARCHAR(200) DEFAULT NULL',
+      'document_type VARCHAR(50) DEFAULT NULL',
+      'publish_date DATE DEFAULT NULL',
+      'effective_date DATE DEFAULT NULL',
+      "current_status VARCHAR(50) NOT NULL DEFAULT '现行有效'",
+      "verification_status VARCHAR(50) NOT NULL DEFAULT 'pending'",
       "parse_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
       'parse_message VARCHAR(500) DEFAULT NULL',
       "status VARCHAR(20) NOT NULL DEFAULT 'active'",
@@ -500,10 +519,44 @@ const schemaInit = {
 
     await this._addIndex('knowledge', 'idx_knowledge_status', 'KEY idx_knowledge_status (status)')
     await this._addIndex('knowledge', 'idx_knowledge_title', 'KEY idx_knowledge_title (title(100))')
+    await this._addIndex('knowledge', 'idx_knowledge_source_code', 'KEY idx_knowledge_source_code (source_code)')
+    await this._addIndex('knowledge', 'idx_knowledge_document_type', 'KEY idx_knowledge_document_type (document_type)')
+    await this._addIndex('knowledge', 'idx_knowledge_verification_status', 'KEY idx_knowledge_verification_status (verification_status)')
 
     // 外键
     await this._addFK('knowledge', 'fk_knowledge_category',
       'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+  },
+
+  // =========================================================================
+  // Step 9.2: 知识文档适用分类关联表（一份法规可适用于多个行业分类）
+  // =========================================================================
+  async step09KnowledgeCategoryRelations() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS knowledge_category_relations (
+        knowledge_id  INT         NOT NULL,
+        category_id   INT         NOT NULL,
+        relation_type VARCHAR(20) NOT NULL DEFAULT 'applicable',
+        created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (knowledge_id, category_id),
+        KEY idx_kcr_category_id (category_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await this._addFK('knowledge_category_relations', 'fk_kcr_knowledge',
+      'FOREIGN KEY (knowledge_id) REFERENCES knowledge (id) ON DELETE CASCADE ON UPDATE CASCADE')
+    await this._addFK('knowledge_category_relations', 'fk_kcr_category',
+      'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE CASCADE ON UPDATE CASCADE')
+
+    // 将旧的主分类关系回填为适用分类，确保现有知识文档进入多分类检索体系。
+    try {
+      await db.execute(`
+        INSERT IGNORE INTO knowledge_category_relations (knowledge_id, category_id)
+        SELECT id, category_id
+        FROM knowledge
+        WHERE category_id IS NOT NULL
+      `)
+    } catch (e) { /* 忽略 */ }
   },
 
   // =========================================================================
@@ -517,6 +570,13 @@ const schemaInit = {
         category_id   INT           DEFAULT NULL,
         source_title  VARCHAR(300)  NOT NULL,
         source_code   VARCHAR(100)  DEFAULT NULL,
+        source_url    VARCHAR(1000) DEFAULT NULL,
+        issuing_authority VARCHAR(200) DEFAULT NULL,
+        document_type VARCHAR(50) DEFAULT NULL,
+        publish_date  DATE DEFAULT NULL,
+        effective_date DATE DEFAULT NULL,
+        current_status VARCHAR(50) NOT NULL DEFAULT '现行有效',
+        verification_status VARCHAR(50) NOT NULL DEFAULT 'pending',
         clause_no     VARCHAR(100)  DEFAULT NULL,
         content       TEXT          NOT NULL,
         keywords      VARCHAR(500)  DEFAULT NULL,
@@ -533,6 +593,22 @@ const schemaInit = {
         KEY idx_kcl_sort (sort)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `)
+
+    for (const colDef of [
+      'source_url VARCHAR(1000) DEFAULT NULL',
+      'issuing_authority VARCHAR(200) DEFAULT NULL',
+      'document_type VARCHAR(50) DEFAULT NULL',
+      'publish_date DATE DEFAULT NULL',
+      'effective_date DATE DEFAULT NULL',
+      "current_status VARCHAR(50) NOT NULL DEFAULT '现行有效'",
+      "verification_status VARCHAR(50) NOT NULL DEFAULT 'pending'",
+    ]) {
+      await this._addColumn('knowledge_clauses', colDef)
+    }
+
+    await this._addIndex('knowledge_clauses', 'idx_kcl_document_type', 'KEY idx_kcl_document_type (document_type)')
+    await this._addIndex('knowledge_clauses', 'idx_kcl_verification_status', 'KEY idx_kcl_verification_status (verification_status)')
+    await this._addIndex('knowledge_clauses', 'idx_kcl_current_status', 'KEY idx_kcl_current_status (current_status)')
 
     await this._addFK('knowledge_clauses', 'fk_kcl_knowledge',
       'FOREIGN KEY (knowledge_id) REFERENCES knowledge (id) ON DELETE CASCADE ON UPDATE CASCADE')

@@ -123,6 +123,14 @@ const extractClauses = async ({
   knowledgeId,
   categoryId,
   sourceTitle,
+  sourceCode,
+  sourceUrl,
+  issuingAuthority,
+  documentType,
+  publishDate,
+  effectiveDate,
+  currentStatus,
+  verificationStatus,
   description,
 }) => {
   const normalizedType = String(fileType || path.extname(absolutePath).replace('.', '')).toLowerCase()
@@ -156,7 +164,7 @@ const extractClauses = async ({
     }
   }
 
-  const sourceCode = inferSourceCode(sourceTitle, description)
+  const resolvedSourceCode = sourceCode || inferSourceCode(sourceTitle, description)
   const contents = splitTextToClauseContents(text)
   const clauses = contents.map((content, index) => {
     const normalizedContent = content.slice(0, MAX_CLAUSE_CONTENT_LENGTH)
@@ -164,7 +172,14 @@ const extractClauses = async ({
       knowledge_id: knowledgeId,
       category_id: categoryId || null,
       source_title: sourceTitle || '',
-      source_code: sourceCode,
+      source_code: resolvedSourceCode,
+      source_url: sourceUrl || null,
+      issuing_authority: issuingAuthority || null,
+      document_type: documentType || null,
+      publish_date: publishDate || null,
+      effective_date: effectiveDate || null,
+      current_status: currentStatus || '现行有效',
+      verification_status: verificationStatus || 'pending',
       clause_no: parseClauseNo(normalizedContent, index + 1),
       content: normalizedContent,
       keywords: buildKeywords(normalizedContent),

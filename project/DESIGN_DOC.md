@@ -59,7 +59,7 @@
 
 ### 3.3 数据层（MySQL + 本地文件）
 
-- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/inspection_report_knowledge_refs/knowledge_categories/knowledge/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge_clauses` 用于保存自动抽取的法规条款，`inspection_report_knowledge_refs` 用于保存报告生成时命中的依据快照。
+- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/inspection_report_knowledge_refs/knowledge_categories/knowledge/knowledge_category_relations/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge` 保存法规文档及官方来源元数据，`knowledge_category_relations` 支持一份通用法规适用于多个行业分类，`knowledge_clauses` 用于保存自动抽取的法规条款和来源快照，`inspection_report_knowledge_refs` 用于保存报告生成时命中的依据快照。
 - **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`、`uploads/report-templates/`；隐患图片、报告文件和报告模板均通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
@@ -172,13 +172,41 @@ pages/
 ### 7.2 知识库入库（管理员）
 
 ```
-1. 上传 PDF/Word 文件 → 后端接收存入 uploads/
-2. 后端解析文档：PDF 使用 pdf-parse，DOCX 使用 jszip 读取 word/document.xml，DOC 旧二进制格式仅保留文件级管理
-3. 识别条款格式 → 拆分条款存入 knowledge_clauses 表
-4. 无法识别明确条款编号时 → 按段落降级入库；无法抽取文本时保留知识文档并标记为待人工复核
-5. 管理员可查看条款数量和解析状态，可编辑/归档/批量操作知识文档
-6. AI 隐患分析会基于用户描述、企业信息、图片标签和文件名检索本地条款；命中条款只作为受控上下文提供给模型，报告保存后同步保存引用快照
+1. 管理员从固定 14 类法规分类中选择主分类，并可勾选多个适用分类
+2. 录入官方来源 URL、发布机关、文号/标准号、文件类型、发布日期、施行日期、现行状态和人工校验状态
+3. 上传 PDF/Word 文件 → 后端接收存入 uploads/
+4. 后端解析文档：PDF 使用 pdf-parse，DOCX 使用 jszip 读取 word/document.xml，DOC 旧二进制格式仅保留文件级管理
+5. 识别条款格式 → 拆分条款存入 knowledge_clauses 表，并同步保存官方来源快照
+6. 无法识别明确条款编号时 → 按段落降级入库；无法抽取文本时保留知识文档并标记为待人工复核
+7. 管理员可查看条款数量、解析状态、来源信息和校验状态，可编辑/归档/批量操作知识文档
+8. AI 隐患分析会基于用户描述、企业信息、图片标签和文件名检索本地条款；命中条款只作为受控上下文提供给模型，报告保存后同步保存引用快照
 ```
+
+固定法规分类：
+
+| 序号 | 分类 |
+|---|---|
+| 1 | 煤矿安全 |
+| 2 | 非煤矿山安全 |
+| 3 | 危险化学品与化工安全 |
+| 4 | 建筑施工安全 |
+| 5 | 消防安全 |
+| 6 | 特种设备安全 |
+| 7 | 交通运输安全 |
+| 8 | 工贸行业安全 |
+| 9 | 电力安全 |
+| 10 | 石油天然气安全 |
+| 11 | 农林牧渔安全 |
+| 12 | 职业健康与劳动安全 |
+| 13 | 应急与事故管理 |
+| 14 | 其他专项安全 |
+
+来源追溯原则：
+
+- `knowledge.category_id` 为主分类，`knowledge_category_relations` 为适用分类。
+- 官方来源字段从 `knowledge` 同步到自动抽取的 `knowledge_clauses`，便于后续报告引用时保留快照。
+- `verification_status = pending` 的条文可以用于管理员整理和测试检索，但后续严格判断阶段不得直接作为正式法规结论。
+- 历史分类“安全生产隐患排查报告”不再作为法规分类返回；旧数据不删除，仅保留兼容。
 
 ## 8. 接口规范
 
