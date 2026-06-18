@@ -11,6 +11,8 @@
 
 - [稳定演示版本说明](./STABLE_VERSION.md)
 - [稳定版本交接说明](./RELEASE_HANDOFF.md)
+- [阶段演示使用报告](./DEMO_USAGE_REPORT.md)
+- [发布与回归检查清单](./RELEASE_CHECKLIST.md)
 - [接口文档](./API_DOC.md)
 - [设计文档](./DESIGN_DOC.md)
 - [部署文档](./DEPLOY.md)
@@ -65,6 +67,8 @@ project/
 ├── README.md
 ├── STABLE_VERSION.md
 ├── RELEASE_HANDOFF.md
+├── DEMO_USAGE_REPORT.md
+├── RELEASE_CHECKLIST.md
 ├── API_DOC.md
 ├── DESIGN_DOC.md
 ├── DEPLOY.md
@@ -426,9 +430,12 @@ taskkill /PID 进程号 /F
 
 - [稳定演示版本说明](./STABLE_VERSION.md)
 - [稳定版本交接说明](./RELEASE_HANDOFF.md)
+- [阶段演示使用报告](./DEMO_USAGE_REPORT.md)
+- [发布与回归检查清单](./RELEASE_CHECKLIST.md)
 - [接口文档](./API_DOC.md)
 - [设计文档](./DESIGN_DOC.md)
 - [部署文档](./DEPLOY.md)
 - [Docker 本地部署说明](./DEPLOY_DOCKER.md)
+- [本地开发同步说明](./LOCAL_DEV_SYNC.md)
 - [阶段开发计划](./PHASE_PLAN.md)
 - [方案 B 分阶段路线](./PHASE_B_ROADMAP.md)
