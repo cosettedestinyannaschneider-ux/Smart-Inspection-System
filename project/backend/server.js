@@ -177,7 +177,9 @@ const resolveKnowledgeErrorCode = (error) => {
   return ErrorCode.PARAM_INVALID
 }
 
-schemaInit.init().catch(err => console.error('[Server] Schema init failed:', err))
+if (process.env.NODE_ENV !== 'test') {
+  schemaInit.init().catch(err => console.error('[Server] Schema init failed:', err))
+}
 
 /** 统一读取当前登录用户 ID */
 const getAuthUserId = (req) => Number(req.auth?.userId || 0)
@@ -1316,6 +1318,10 @@ app.get('/api/admin/backup/:backup_id/file', async (req, res) => {
 // 启动服务
 // =========================================================================
 const PORT = process.env.PORT || C.DEFAULT_PORT
-app.listen(PORT, () => {
-  console.log(`[Server] Running on port ${PORT}`)
-})
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`[Server] Running on port ${PORT}`)
+  })
+}
+
+module.exports = app

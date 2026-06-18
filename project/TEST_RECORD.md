@@ -1,5 +1,27 @@
 # 功能测试记录
 
+## PR11：后端认证与核心流程自动化测试基线（2026-06-18）
+
+### 变更范围
+
+- 新增 `node:test` + `supertest` 后端接口测试基线。
+- 覆盖登录成功/失败、Bearer Token 缺失/伪造/过期/撤销、管理员接口鉴权、模型配置增查改启用检测删除、受控报告下载、隐患图片分析主链路。
+- 测试通过 mock 隔离真实数据库、真实 AI API 和真实报告模板生成，不读取或修改本地 `.env`。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix E:\University\Project\project1.0\project\backend run check` 通过，`[syntax-check] passed: 48 files` | 通过 |
+| 后端自动化测试 | `npm --prefix E:\University\Project\project1.0\project\backend test` 通过，15 个用例全部通过 | 通过 |
+| Git diff 空白检查 | `git -C E:\University\Project\project1.0 diff --check` 通过，仅提示 Windows CRLF 工作区换行转换警告 | 通过 |
+
+### 风险说明
+
+- 本轮不涉及 DDL、接口入参变更或新增环境变量。
+- `supertest` 仅作为后端开发测试依赖，不进入生产运行链路。
+- 受控报告下载缺少鉴权的用例会触发服务端现有错误日志输出，属于预期失败分支验证，不代表测试失败。
+
 ## 阶段 F 第二轮：报告引用依据追溯（2026-06-17）
 
 ### 变更范围
