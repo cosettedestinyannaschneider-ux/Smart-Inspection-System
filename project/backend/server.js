@@ -10,6 +10,7 @@ const authService = require('./bll/authService')
 const aiService = require('./bll/aiService')
 const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
+const legalClauseImportService = require('./bll/legalClauseImportService')
 const modelConfigService = require('./bll/modelConfigService')
 const adminWorkbenchService = require('./bll/adminWorkbenchService')
 const reportTemplateService = require('./bll/reportTemplateService')
@@ -143,6 +144,20 @@ const knowledgeUpload = multer({
   },
 })
 
+const legalClauseCsvUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(C.UPLOAD_DIR, C.KNOWLEDGE_UPLOAD_SUBDIR)),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`),
+  }),
+  fileFilter: (req, file, cb) => {
+    if (!/\.csv$/i.test(String(file.originalname || ''))) {
+      return cb(new Error('仅支持上传 CSV 文件'))
+    }
+    return cb(null, true)
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+})
+
 // 初始化数据库
 /** 包装模板上传中间件，统一处理文件格式与缺失错误 */
 const useReportTemplateUpload = (fieldName) => (req, res, next) => {
@@ -166,6 +181,15 @@ const useKnowledgeUpload = (fieldName) => (req, res, next) => {
       return res.fail(ErrorCode.FILE_FORMAT_INVALID, error.message)
     }
     return res.fail(ErrorCode.FILE_REQUIRED, error.message || '知识库文件上传失败')
+  })
+}
+
+/** CSV 上传中间件，统一返回业务错误 */
+const useLegalClauseCsvUpload = (fieldName) => (req, res, next) => {
+  const handler = legalClauseCsvUpload.single(fieldName)
+  handler(req, res, (err) => {
+    if (!err) return next()
+    return res.fail(ErrorCode.INVALID_PARAM, err.message || 'CSV 上传失败')
   })
 }
 
@@ -938,6 +962,26 @@ app.post('/api/admin/knowledge/batch-delete', adminAuth, async (req, res) => {
     res.success({ archived_ids: archivedList.map((item) => item.id) }, '知识条目已批量归档')
   } catch (err) {
     res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/clauses/import-csv', adminAuth, useLegalClauseCsvUpload('file'), async (req, res) => {
+  try {
+    if (!req.file?.path) return res.fail(ErrorCode.FILE_REQUIRED, '请上传法规条文 CSV 文件')
+    const summary = await legalClauseImportService.importCsvFile(req.file.path)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_IMPORT_LEGAL_CLAUSES, {
+      total_rows: summary.total_rows,
+      imported_clauses: summary.imported_clauses,
+      skipped_duplicates: summary.skipped_duplicates,
+      failed_count: summary.failed_rows.length,
+    }, req.ip)
+    res.success(summary, '法规条文导入完成')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  } finally {
+    if (req.file?.path) {
+      fs.promises.unlink(req.file.path).catch(() => {})
+    }
   }
 })
 

@@ -481,6 +481,7 @@ Authorization: Bearer <access_token>
 |---|---|---|
 | `POST /api/admin/knowledge/list` | 无业务参数 | 页面初始化加载文档列表 |
 | `POST /api/admin/knowledge/clauses/list` | `knowledge_id` 或 `id` | 管理员检查某个文档的条款抽取结果 |
+| `POST /api/admin/knowledge/clauses/import-csv` | Multipart：`file` | 批量导入法规条文 CSV |
 | `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`applicable_category_ids`、来源字段、`file` | 新增必须上传文件 |
 | `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id`、`applicable_category_ids`、来源字段 | 编辑但不更换文件 |
 | `POST /api/admin/knowledge/save` | Multipart：`id`、`title`、`description`、`category_id`、`applicable_category_ids`、来源字段、可选 `file` | 编辑并替换文件时使用 |
@@ -505,6 +506,10 @@ Authorization: Bearer <access_token>
 - 自动抽取的条款写入 `knowledge_clauses`，单文档最多自动保留 300 条，单条内容最多保留 4000 字符
 - `knowledge.parse_status` 记录抽取状态：`pending`、`parsed`、`skipped`、`failed`
 - `knowledge.parse_message` 记录跳过原因或失败原因，便于管理员复核
+- CSV 导入模板位于 `project/database/legal_clause_import_template.csv`，演示种子位于 `project/database/legal_clause_seed.csv`
+- CSV 导入字段固定为：分类、法规名称、文号/标准号、条款号、条文内容、关键词、官方来源URL、发布机关、施行日期、现行状态、备注
+- CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过
+- 命令行导入演示种子：`npm --prefix project/backend run import:legal-clauses`
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
 - 本轮仅完成条款结构化入库和检查接口，不改变 AI 分析与报告引用流程；报告依据追溯由后续 PR 接入

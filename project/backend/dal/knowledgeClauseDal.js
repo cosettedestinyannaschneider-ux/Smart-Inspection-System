@@ -1,5 +1,36 @@
 const db = require('./db')
 
+const CLAUSE_INSERT_SQL = `
+  INSERT INTO knowledge_clauses
+    (
+      knowledge_id, category_id, source_title, source_code, source_url,
+      issuing_authority, document_type, publish_date, effective_date,
+      current_status, verification_status, clause_no, content, keywords,
+      sort, status
+    )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+/** 将条款对象整理为 SQL 参数 */
+const buildClauseParams = (knowledgeId, clause = {}) => [
+  knowledgeId,
+  clause.category_id || null,
+  clause.source_title || '',
+  clause.source_code || null,
+  clause.source_url || null,
+  clause.issuing_authority || null,
+  clause.document_type || null,
+  clause.publish_date || null,
+  clause.effective_date || null,
+  clause.current_status || '现行有效',
+  clause.verification_status || 'pending',
+  clause.clause_no || null,
+  clause.content || '',
+  clause.keywords || null,
+  Number(clause.sort || 0) || 0,
+  clause.status || 'active',
+]
+
 /** 知识条款数据访问层，服务 AI 报告依据追溯 */
 const knowledgeClauseDal = {
   /** 批量替换某个知识文档的条款，确保文件更新后条款与文件内容一致 */
@@ -10,34 +41,7 @@ const knowledgeClauseDal = {
       await connection.execute('DELETE FROM knowledge_clauses WHERE knowledge_id = ?', [knowledgeId])
 
       for (const clause of clauses) {
-        await connection.execute(
-          `INSERT INTO knowledge_clauses
-            (
-              knowledge_id, category_id, source_title, source_code, source_url,
-              issuing_authority, document_type, publish_date, effective_date,
-              current_status, verification_status, clause_no, content, keywords,
-              sort, status
-            )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            knowledgeId,
-            clause.category_id || null,
-            clause.source_title || '',
-            clause.source_code || null,
-            clause.source_url || null,
-            clause.issuing_authority || null,
-            clause.document_type || null,
-            clause.publish_date || null,
-            clause.effective_date || null,
-            clause.current_status || '现行有效',
-            clause.verification_status || 'pending',
-            clause.clause_no || null,
-            clause.content || '',
-            clause.keywords || null,
-            Number(clause.sort || 0) || 0,
-            clause.status || 'active',
-          ]
-        )
+        await connection.execute(CLAUSE_INSERT_SQL, buildClauseParams(knowledgeId, clause))
       }
 
       await connection.commit()
@@ -47,6 +51,28 @@ const knowledgeClauseDal = {
     } finally {
       connection.release()
     }
+  },
+
+  /** 追加单条条款，供 CSV 批量导入使用 */
+  async create(knowledgeId, clause = {}) {
+    const [res] = await db.execute(CLAUSE_INSERT_SQL, buildClauseParams(knowledgeId, clause))
+    return res.insertId
+  },
+
+  /** 按法规来源、条款号和内容查询重复条款 */
+  async findDuplicate({ source_title, source_code = null, clause_no = null, content = '' }) {
+    const [rows] = await db.execute(
+      `SELECT *
+       FROM knowledge_clauses
+       WHERE status = 'active'
+         AND source_title = ?
+         AND (source_code <=> ?)
+         AND (clause_no <=> ?)
+         AND content = ?
+       LIMIT 1`,
+      [source_title || '', source_code || null, clause_no || null, content || '']
+    )
+    return rows[0] || null
   },
 
   /** 归档某个知识文档下的全部条款 */
