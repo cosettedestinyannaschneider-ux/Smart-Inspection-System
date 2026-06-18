@@ -1,5 +1,29 @@
 # 功能测试记录
 
+## PR14：法规条文 CSV 导入器与演示种子（2026-06-18）
+
+### 变更范围
+
+- 新增法规条文 CSV 导入模板 `project/database/legal_clause_import_template.csv`。
+- 新增小规模公开法规演示种子 `project/database/legal_clause_seed.csv`。
+- 新增后端导入服务、命令行脚本和管理员 CSV 上传接口。
+- 管理端知识库页面增加“导入条文CSV”入口。
+- CSV 导入会校验固定 14 类分类、必填字段、日期格式和重复条款。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix E:\University\Project\project1.0\project\backend run check` 通过，`[syntax-check] passed: 53 files` | 通过 |
+| 后端自动化测试 | `npm --prefix E:\University\Project\project1.0\project\backend test` 通过，18 个用例全部通过 | 通过 |
+| 前端 H5 构建 | `npm --prefix E:\University\Project\project1.0\project\uni-app-frontend run build:h5` 通过，输出 `DONE Build complete` | 通过 |
+
+### 风险说明
+
+- 本轮不新增 DDL，不修改 `.env`，不要求重建数据库。
+- 命令行导入脚本会连接本地数据库，默认导入演示 CSV；公共 CI 不自动执行该脚本。
+- 演示种子只覆盖少量高频场景，不代表完整法规库。
+
 ## PR12：CI 分层与演示发布清单（2026-06-18）
 
 ### 变更范围

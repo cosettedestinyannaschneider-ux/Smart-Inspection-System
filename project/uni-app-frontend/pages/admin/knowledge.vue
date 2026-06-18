@@ -7,6 +7,7 @@
       </view>
       <view class="page-action-row">
         <view class="secondary-btn" @click="openCategoryModal">分类管理</view>
+        <view class="secondary-btn" @click="pickClauseCsv">导入条文CSV</view>
         <view class="primary-btn" @click="openAdd">上传文档</view>
       </view>
     </view>
@@ -620,6 +621,78 @@ const pickFile = () => {
     },
   })
   // #endif
+}
+
+const pickClauseCsv = () => {
+  // #ifdef H5
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.csv'
+  input.onchange = async (event) => {
+    const file = event?.target?.files?.[0]
+    if (file) await importClauseCsv(file)
+  }
+  input.click()
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  wx.chooseMessageFile({
+    count: 1,
+    type: 'file',
+    extension: ['csv'],
+    success: async (result) => {
+      const file = result?.tempFiles?.[0]
+      if (file) await importClauseCsv(file)
+    },
+    fail: () => {
+      showMessage('CSV 文件选择失败')
+    },
+  })
+  // #endif
+}
+
+const importClauseCsv = async (file) => {
+  const fileName = String(file?.name || '').trim()
+  if (fileName && !/\.csv$/i.test(fileName)) {
+    showMessage('仅支持导入 CSV 文件')
+    return
+  }
+
+  submitting.value = true
+  try {
+    let result
+    // #ifdef H5
+    const body = new FormData()
+    body.append('file', file)
+    const headers = {}
+    const accessToken = getAccessToken()
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+    const response = await fetch(apiUrl('/api/admin/knowledge/clauses/import-csv'), {
+      method: 'POST',
+      headers,
+      body,
+    })
+    const payloadData = await response.json().catch(() => null)
+    result = parseUploadResponse({ data: payloadData })
+    // #endif
+
+    // #ifdef MP-WEIXIN
+    result = await uploadKnowledgeForWechat('/api/admin/knowledge/clauses/import-csv', {}, file)
+    // #endif
+
+    const summary = result?.data || {}
+    uni.showModal({
+      title: '导入完成',
+      content: `新增条款 ${summary.imported_clauses || 0} 条，新增文档 ${summary.created_knowledge || 0} 个，跳过重复 ${summary.skipped_duplicates || 0} 条，失败 ${summary.failed_rows?.length || 0} 行。`,
+      showCancel: false,
+    })
+    await fetchKnowledge()
+    await fetchCategories()
+  } catch (error) {
+    showMessage(error?.message || '法规条文导入失败')
+  } finally {
+    submitting.value = false
+  }
 }
 
 const buildKnowledgePayload = () => {

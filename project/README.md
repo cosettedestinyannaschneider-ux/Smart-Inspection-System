@@ -216,6 +216,23 @@ mysql --default-character-set=utf8mb4 -u root -p ai_project -e "source E:/Univer
 - 正式开发或正式部署不建议依赖大量人工填充的测试数据。
 - 启动后端时，`schemaInit` 还会自动做一次兼容迁移检查，适合旧库升级场景。
 
+### 5.4 可选：导入法规条文演示种子
+
+仓库提供了 CSV 导入模板和少量公开法规条文演示种子：
+
+- [database/legal_clause_import_template.csv](./database/legal_clause_import_template.csv)
+- [database/legal_clause_seed.csv](./database/legal_clause_seed.csv)
+
+导入前请确认 `.env` 中数据库连接可用，并已执行基础表结构初始化。命令：
+
+```powershell
+npm --prefix E:\University\Project\project1.0\project\backend run import:legal-clauses
+```
+
+也可以在管理员知识库页面点击“导入条文CSV”，上传按模板整理好的 CSV 文件。
+
+说明：演示种子只用于让知识库具备最小法规依据，不等于完整法规库。正式使用时应继续从官方公开来源整理、校验并导入条文。
+
 ## 6. 后端启动
 
 进入后端目录：

@@ -72,15 +72,17 @@ const knowledgeDal = {
       effective_date = null,
       current_status = '现行有效',
       verification_status = 'pending',
+      parse_status = 'pending',
+      parse_message = null,
     } = params
 
     const [res] = await db.execute(
       `INSERT INTO knowledge (
         title, file_path, file_size, file_type, description, category_id,
         source_code, source_url, issuing_authority, document_type, publish_date,
-        effective_date, current_status, verification_status
+        effective_date, current_status, verification_status, parse_status, parse_message
       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         file_path,
@@ -96,6 +98,8 @@ const knowledgeDal = {
         effective_date,
         current_status,
         verification_status,
+        parse_status,
+        parse_message,
       ]
     )
     return res.insertId
@@ -121,6 +125,24 @@ const knowledgeDal = {
       WHERE k.id = ?
       LIMIT 1
     `, [id])
+    const record = rows[0]
+    if (!record) return null
+    return {
+      ...record,
+      file_name: record.file_path ? path.posix.basename(String(record.file_path).replace(/\\/g, '/')) : null,
+    }
+  },
+
+  /** 按来源身份查找知识文档，供法规条文批量导入复用已有文档 */
+  async findBySourceIdentity({ title, source_code = null, source_url = null }) {
+    const [rows] = await db.execute(`
+      ${KNOWLEDGE_SELECT_SQL}
+      WHERE k.status = 'active'
+        AND k.title = ?
+        AND (k.source_code <=> ?)
+        AND (k.source_url <=> ?)
+      LIMIT 1
+    `, [title, source_code || null, source_url || null])
     const record = rows[0]
     if (!record) return null
     return {
