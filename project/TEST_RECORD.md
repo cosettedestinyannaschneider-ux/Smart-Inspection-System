@@ -1,5 +1,32 @@
 # 功能测试记录
 
+## PR12：CI 分层与演示发布清单（2026-06-18）
+
+### 变更范围
+
+- GitHub Actions 增加 `backend-test` 作业，使用 `node:test` + `supertest` 跑后端 mock 测试。
+- CI 固定分层为后端语法检查、后端 mock 测试、前端 H5 构建、Docker 镜像构建。
+- 新增 `RELEASE_CHECKLIST.md`，统一发布前、回归前、合并前检查项。
+- 新增 `DEMO_USAGE_REPORT.md`，用于阶段汇报和项目演示说明。
+- README 增加演示报告和发布清单入口，修正文档导航链接。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix E:\University\Project\project1.0\project\backend run check` 通过，`[syntax-check] passed: 48 files` | 通过 |
+| 后端自动化测试 | `npm --prefix E:\University\Project\project1.0\project\backend test` 通过，15 个用例全部通过 | 通过 |
+| 前端 H5 构建 | `npm --prefix E:\University\Project\project1.0\project\uni-app-frontend run build:h5` 通过，输出 `DONE Build complete` | 通过 |
+| Docker 后端镜像构建 | `docker build -t safety-inspection-backend ./project/backend` 在本机失败：Docker Desktop Linux engine 未运行 | 受环境限制 |
+| Docker 前端镜像构建 | 未继续执行；本机 Docker daemon 不可用，GitHub Actions 中继续验证 | 受环境限制 |
+| Git diff 空白检查 | `git -C E:\University\Project\project1.0 diff --check` 通过，仅提示 Windows CRLF 工作区换行转换警告 | 通过 |
+
+### 风险说明
+
+- 本轮不涉及 DDL，不修改 `.env`，不要求重建数据库。
+- CI 中使用 mock AI 配置和 CI 临时 MySQL 密码，不使用真实数据库密码或真实 API Key。
+- 新增文档用于演示和发布治理，不改变业务接口行为。
+
 ## PR11：后端认证与核心流程自动化测试基线（2026-06-18）
 
 ### 变更范围

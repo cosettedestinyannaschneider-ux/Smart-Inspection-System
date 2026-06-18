@@ -8,6 +8,9 @@ on:
       - 'feature/**'
       - 'fix/**'
       - 'codex/**'
+      - 'chore/**'
+      - 'docs/**'
+      - 'test/**'
   pull_request:
 
 jobs:
@@ -54,6 +57,54 @@ jobs:
 
       - name: Build H5 frontend
         run: npm run build:h5
+
+  backend-test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_test_password
+          MYSQL_DATABASE: ai_project
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    defaults:
+      run:
+        working-directory: project/backend
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ci_test_password
+      DB_NAME: ai_project
+      JWT_ACCESS_SECRET: ci-jwt-access-secret-for-mock-tests
+      JWT_ACCESS_EXPIRES_IN: 8h
+      MODEL_CONFIG_SECRET: 12345678901234567890123456789012
+      ARK_BASE_URL: https://example.test/v1
+      ARK_API_KEY: mock-api-key
+      ARK_MODEL: mock-vision-model
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: project/backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Run backend mock tests
+        run: npm test
 
   docker-build:
     runs-on: ubuntu-latest
