@@ -246,6 +246,14 @@ CREATE TABLE knowledge (
   file_type   VARCHAR(20)   DEFAULT NULL COMMENT 'pdf|docx|doc|image',
   description TEXT          DEFAULT NULL,
   category_id INT           DEFAULT NULL,
+  source_code VARCHAR(100)  DEFAULT NULL COMMENT '文号或标准号',
+  source_url  VARCHAR(1000) DEFAULT NULL COMMENT '官方来源URL',
+  issuing_authority VARCHAR(200) DEFAULT NULL COMMENT '发布机关',
+  document_type VARCHAR(50) DEFAULT NULL COMMENT '文件类型：法律/行政法规/部门规章/规范性文件/国家标准/行业标准等',
+  publish_date DATE DEFAULT NULL COMMENT '发布日期',
+  effective_date DATE DEFAULT NULL COMMENT '施行日期',
+  current_status VARCHAR(50) NOT NULL DEFAULT '现行有效' COMMENT '现行状态',
+  verification_status VARCHAR(50) NOT NULL DEFAULT 'pending' COMMENT '人工校验状态：pending/verified/rejected',
   parse_status ENUM('pending','parsed','skipped','failed') NOT NULL DEFAULT 'pending' COMMENT '条款抽取状态',
   parse_message VARCHAR(500) DEFAULT NULL COMMENT '条款抽取说明或失败原因',
   status      ENUM('active','archived') NOT NULL DEFAULT 'active',
@@ -254,6 +262,9 @@ CREATE TABLE knowledge (
   PRIMARY KEY (id),
   KEY idx_knowledge_category (category_id),
   KEY idx_knowledge_title (title),
+  KEY idx_knowledge_source_code (source_code),
+  KEY idx_knowledge_document_type (document_type),
+  KEY idx_knowledge_verification_status (verification_status),
   KEY idx_knowledge_status (status),
   CONSTRAINT fk_knowledge_category
     FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
@@ -261,7 +272,25 @@ CREATE TABLE knowledge (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 12. 知识库条款表（AI 报告引用依据）
+-- 12. 知识文档适用分类关联表（支持一份通用法规适用于多个行业）
+-- ============================================================================
+CREATE TABLE knowledge_category_relations (
+  knowledge_id  INT         NOT NULL COMMENT '知识文档ID',
+  category_id   INT         NOT NULL COMMENT '适用分类ID',
+  relation_type VARCHAR(20) NOT NULL DEFAULT 'applicable' COMMENT '关联类型',
+  created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (knowledge_id, category_id),
+  KEY idx_kcr_category_id (category_id),
+  CONSTRAINT fk_kcr_knowledge
+    FOREIGN KEY (knowledge_id) REFERENCES knowledge (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_kcr_category
+    FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识文档适用分类关联表';
+
+-- ============================================================================
+-- 13. 知识库条款表（AI 报告引用依据）
 -- ============================================================================
 CREATE TABLE knowledge_clauses (
   id            INT           NOT NULL AUTO_INCREMENT,
@@ -269,6 +298,13 @@ CREATE TABLE knowledge_clauses (
   category_id   INT           DEFAULT NULL COMMENT '冗余分类，便于后续检索',
   source_title  VARCHAR(300)  NOT NULL COMMENT '来源文档标题',
   source_code   VARCHAR(100)  DEFAULT NULL COMMENT '法规或标准编号',
+  source_url    VARCHAR(1000) DEFAULT NULL COMMENT '官方来源URL快照',
+  issuing_authority VARCHAR(200) DEFAULT NULL COMMENT '发布机关快照',
+  document_type VARCHAR(50) DEFAULT NULL COMMENT '文件类型快照',
+  publish_date  DATE DEFAULT NULL COMMENT '发布日期快照',
+  effective_date DATE DEFAULT NULL COMMENT '施行日期快照',
+  current_status VARCHAR(50) NOT NULL DEFAULT '现行有效' COMMENT '现行状态快照',
+  verification_status VARCHAR(50) NOT NULL DEFAULT 'pending' COMMENT '人工校验状态快照',
   clause_no     VARCHAR(100)  DEFAULT NULL COMMENT '条款号',
   content       TEXT          NOT NULL COMMENT '条款内容',
   keywords      VARCHAR(500)  DEFAULT NULL COMMENT '关键词，用于 MySQL 关键词检索',
@@ -280,6 +316,9 @@ CREATE TABLE knowledge_clauses (
   KEY idx_kcl_knowledge_id (knowledge_id),
   KEY idx_kcl_category_id (category_id),
   KEY idx_kcl_source_code (source_code),
+  KEY idx_kcl_document_type (document_type),
+  KEY idx_kcl_verification_status (verification_status),
+  KEY idx_kcl_current_status (current_status),
   KEY idx_kcl_clause_no (clause_no),
   KEY idx_kcl_status (status),
   KEY idx_kcl_sort (sort),
@@ -292,7 +331,7 @@ CREATE TABLE knowledge_clauses (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识库条款表';
 
 -- ============================================================================
--- 13. 报告-知识条款引用表（报告依据可追溯）
+-- 14. 报告-知识条款引用表（报告依据可追溯）
 -- ============================================================================
 CREATE TABLE inspection_report_knowledge_refs (
   id                  INT           NOT NULL AUTO_INCREMENT,
@@ -411,8 +450,7 @@ INSERT INTO knowledge_categories (name, sort) VALUES
   ('农林牧渔安全', 11),
   ('职业健康与劳动安全', 12),
   ('应急与事故管理', 13),
-  ('其他专项安全', 14),
-  ('安全生产隐患排查报告', 15)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+  ('其他专项安全', 14)
+ON DUPLICATE KEY UPDATE sort = VALUES(sort);
 
 -- 企业和部门属于组织主数据，由管理员创建，不预置无归属部门。

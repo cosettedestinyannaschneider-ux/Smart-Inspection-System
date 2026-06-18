@@ -9,6 +9,14 @@ const ALLOWED_COLUMNS = new Set([
   'file_type',
   'description',
   'category_id',
+  'source_code',
+  'source_url',
+  'issuing_authority',
+  'document_type',
+  'publish_date',
+  'effective_date',
+  'current_status',
+  'verification_status',
   'parse_status',
   'parse_message',
   'status',
@@ -24,9 +32,20 @@ const KNOWLEDGE_SELECT_SQL = `
   SELECT
     k.*,
     c.name AS category_name,
+    COALESCE(kcr.applicable_category_ids, '') AS applicable_category_ids,
+    COALESCE(kcr.applicable_category_names, '') AS applicable_category_names,
     COALESCE(kcc.clause_count, 0) AS clause_count
   FROM knowledge k
   LEFT JOIN knowledge_categories c ON c.id = k.category_id
+  LEFT JOIN (
+    SELECT
+      r.knowledge_id,
+      GROUP_CONCAT(r.category_id ORDER BY rc.sort ASC, rc.id ASC) AS applicable_category_ids,
+      GROUP_CONCAT(rc.name ORDER BY rc.sort ASC, rc.id ASC SEPARATOR '、') AS applicable_category_names
+    FROM knowledge_category_relations r
+    INNER JOIN knowledge_categories rc ON rc.id = r.category_id
+    GROUP BY r.knowledge_id
+  ) kcr ON kcr.knowledge_id = k.id
   LEFT JOIN (
     SELECT knowledge_id, COUNT(*) AS clause_count
     FROM knowledge_clauses
@@ -45,12 +64,39 @@ const knowledgeDal = {
       category_id = null,
       file_size = null,
       file_type = null,
+      source_code = null,
+      source_url = null,
+      issuing_authority = null,
+      document_type = null,
+      publish_date = null,
+      effective_date = null,
+      current_status = '现行有效',
+      verification_status = 'pending',
     } = params
 
     const [res] = await db.execute(
-      `INSERT INTO knowledge (title, file_path, file_size, file_type, description, category_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [title, file_path, file_size, file_type, description, category_id]
+      `INSERT INTO knowledge (
+        title, file_path, file_size, file_type, description, category_id,
+        source_code, source_url, issuing_authority, document_type, publish_date,
+        effective_date, current_status, verification_status
+      )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title,
+        file_path,
+        file_size,
+        file_type,
+        description,
+        category_id,
+        source_code,
+        source_url,
+        issuing_authority,
+        document_type,
+        publish_date,
+        effective_date,
+        current_status,
+        verification_status,
+      ]
     )
     return res.insertId
   },
@@ -104,10 +150,12 @@ const knowledgeDal = {
   /** 统计分类下仍有效的文档数量 */
   async countActiveByCategoryId(categoryId) {
     const [rows] = await db.execute(
-      `SELECT COUNT(*) AS total
-       FROM knowledge
-       WHERE category_id = ? AND status = 'active'`,
-      [categoryId]
+      `SELECT COUNT(DISTINCT k.id) AS total
+       FROM knowledge k
+       LEFT JOIN knowledge_category_relations r ON r.knowledge_id = k.id
+       WHERE k.status = 'active'
+         AND (k.category_id = ? OR r.category_id = ?)`,
+      [categoryId, categoryId]
     )
     return Number(rows[0]?.total || 0)
   },

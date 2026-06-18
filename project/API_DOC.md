@@ -481,18 +481,23 @@ Authorization: Bearer <access_token>
 |---|---|---|
 | `POST /api/admin/knowledge/list` | 无业务参数 | 页面初始化加载文档列表 |
 | `POST /api/admin/knowledge/clauses/list` | `knowledge_id` 或 `id` | 管理员检查某个文档的条款抽取结果 |
-| `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`file` | 新增必须上传文件 |
-| `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id` | 编辑但不更换文件 |
-| `POST /api/admin/knowledge/save` | Multipart：`id`、`title`、`description`、`category_id`、可选 `file` | 编辑并替换文件时使用 |
+| `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`applicable_category_ids`、来源字段、`file` | 新增必须上传文件 |
+| `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id`、`applicable_category_ids`、来源字段 | 编辑但不更换文件 |
+| `POST /api/admin/knowledge/save` | Multipart：`id`、`title`、`description`、`category_id`、`applicable_category_ids`、来源字段、可选 `file` | 编辑并替换文件时使用 |
 | `POST /api/admin/knowledge/delete` | `id` | 单条归档，默认不物理删除文件 |
 | `POST /api/admin/knowledge/batch-delete` | `ids: number[]` | 批量归档已选知识文档 |
 | `POST /api/admin/knowledge/categories/list` | 无业务参数 | 页面初始化加载分类 |
-| `POST /api/admin/knowledge/categories/add` | `name`、`sort` | 新增分类 |
-| `POST /api/admin/knowledge/categories/update` | `id`、`name`、`sort` | 编辑分类 |
+| `POST /api/admin/knowledge/categories/add` | `name`、`sort` | 仅允许固定 14 类法规分类名称 |
+| `POST /api/admin/knowledge/categories/update` | `id`、`name`、`sort` | 仅允许固定 14 类法规分类名称 |
 | `POST /api/admin/knowledge/categories/delete` | `id` | 删除无关联文档的分类；若仍有关联文档，后端明确拒绝 |
 
 知识库管理规则：
 
+- 法规分类固定为 14 类：煤矿安全、非煤矿山安全、危险化学品与化工安全、建筑施工安全、消防安全、特种设备安全、交通运输安全、工贸行业安全、电力安全、石油天然气安全、农林牧渔安全、职业健康与劳动安全、应急与事故管理、其他专项安全
+- 历史分类“安全生产隐患排查报告”不再作为法规分类返回；旧库中如已存在，仅作为历史兼容数据保留，不在新建流程中使用
+- `knowledge.category_id` 表示主分类；`knowledge_category_relations` 表示适用分类，一份通用法规可以关联多个行业分类
+- 来源字段包括：`source_code`、`source_url`、`issuing_authority`、`document_type`、`publish_date`、`effective_date`、`current_status`、`verification_status`
+- `verification_status` 取值：`pending` 待校验、`verified` 已校验、`rejected` 不采用；未校验条文后续不得直接作为正式法规结论
 - 仅允许上传 `PDF`、`DOC`、`DOCX`，单文件大小不超过 `20MB`
 - 知识文档统一存放到 `uploads/knowledge/` 子目录，数据库保存相对路径
 - PDF 使用 `pdf-parse` 抽取文本，DOCX 使用 `jszip` 读取 `word/document.xml` 抽取文本
@@ -513,6 +518,16 @@ Authorization: Bearer <access_token>
   "description": "2021年修订版",
   "category_id": 1,
   "category_name": "煤矿安全",
+  "applicable_category_ids": [1, 8],
+  "applicable_category_names": "煤矿安全、工贸行业安全",
+  "source_code": "主席令第八十八号",
+  "source_url": "https://flk.npc.gov.cn/...",
+  "issuing_authority": "全国人民代表大会常务委员会",
+  "document_type": "法律",
+  "publish_date": "2021-06-10",
+  "effective_date": "2021-09-01",
+  "current_status": "现行有效",
+  "verification_status": "verified",
   "file_path": "knowledge/1718527000000-123456789.pdf",
   "file_name": "1718527000000-123456789.pdf",
   "file_type": "PDF",
@@ -538,7 +553,14 @@ Authorization: Bearer <access_token>
       "knowledge_id": 10,
       "category_id": 2,
       "source_title": "中华人民共和国安全生产法",
-      "source_code": null,
+      "source_code": "主席令第八十八号",
+      "source_url": "https://flk.npc.gov.cn/...",
+      "issuing_authority": "全国人民代表大会常务委员会",
+      "document_type": "法律",
+      "publish_date": "2021-06-10",
+      "effective_date": "2021-09-01",
+      "current_status": "现行有效",
+      "verification_status": "verified",
       "clause_no": "第三十六条",
       "content": "生产经营单位应当...",
       "keywords": "生产经营,单位应当",

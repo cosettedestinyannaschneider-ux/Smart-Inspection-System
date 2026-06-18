@@ -3,7 +3,12 @@ const db = require('./db')
 const knowledgeCategoryDal = {
   /** 查询全部知识分类 */
   async findAll() {
-    const [rows] = await db.execute('SELECT * FROM knowledge_categories ORDER BY sort ASC, id ASC')
+    const [rows] = await db.execute(
+      `SELECT *
+       FROM knowledge_categories
+       WHERE name <> '安全生产隐患排查报告'
+       ORDER BY sort ASC, id ASC`
+    )
     return rows
   },
 
