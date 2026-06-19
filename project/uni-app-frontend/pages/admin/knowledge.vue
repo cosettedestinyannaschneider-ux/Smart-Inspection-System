@@ -31,6 +31,43 @@
       </view>
     </view>
 
+    <view v-if="coverage.message" class="coverage-alert" :class="{ warning: !coverage.can_support_formal_assessment }">
+      <text class="coverage-alert-title">{{ coverage.can_support_formal_assessment ? '知识库依据可用' : '知识库依据不足' }}</text>
+      <text class="coverage-alert-text">{{ coverage.message }}</text>
+    </view>
+
+    <view class="coverage-card">
+      <view class="coverage-header">
+        <view>
+          <text class="coverage-title">法规覆盖率</text>
+          <text class="coverage-subtitle">
+            {{ coverage.summary.covered_category_count || 0 }}/{{ coverage.summary.category_count || 0 }} 类已有条文，
+            {{ coverage.summary.usable_category_count || 0 }} 类已有校验条文
+          </text>
+        </view>
+        <text class="coverage-total">全库已校验 {{ coverage.summary.verified_clause_count || 0 }}/{{ coverage.summary.clause_count || 0 }}</text>
+      </view>
+      <view class="coverage-grid">
+        <view
+          v-for="item in coverage.categories"
+          :key="item.category_id"
+          class="coverage-item"
+          :class="coverageStatusClass(item.coverage_status)"
+          @click="activeCategoryId = item.category_id"
+        >
+          <view class="coverage-item-top">
+            <text class="coverage-name">{{ item.category_name }}</text>
+            <text class="coverage-status">{{ coverageStatusText(item.coverage_status) }}</text>
+          </view>
+          <view class="coverage-meta">
+            <text>{{ item.knowledge_count }} 文件</text>
+            <text>{{ item.clause_count }} 条文</text>
+            <text>{{ item.verified_clause_count }} 校验</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <view class="toolbar-card">
       <view class="search-box">
         <text class="search-icon">⌕</text>
@@ -257,6 +294,13 @@ import { apiUrl, getAccessToken, request, unwrapResponse, uploadFile } from '../
 const user = ref({})
 const list = ref([])
 const categories = ref([])
+const coverage = ref({
+  summary: {},
+  categories: [],
+  is_empty: true,
+  can_support_formal_assessment: false,
+  message: '',
+})
 const keyword = ref('')
 const activeCategoryId = ref('all')
 const selectedIds = ref([])
@@ -434,7 +478,7 @@ const applySelectedFile = (file, customName = '') => {
 
 const handleAdminReady = async (admin) => {
   user.value = admin
-  await Promise.all([fetchKnowledge(), fetchCategories()])
+  await Promise.all([fetchKnowledge(), fetchCategories(), fetchCoverage()])
 }
 
 const fetchKnowledge = async () => {
@@ -462,6 +506,34 @@ const fetchCategories = async () => {
   }
 }
 
+const fetchCoverage = async () => {
+  try {
+    const result = await postAdmin('/api/admin/knowledge/coverage')
+    coverage.value = normalizeCoverage(result.data || {})
+  } catch (error) {
+    coverage.value = normalizeCoverage({})
+    showMessage(error?.message || '知识覆盖率加载失败')
+  }
+}
+
+const normalizeCoverage = (data = {}) => ({
+  summary: data.summary || {},
+  categories: Array.isArray(data.categories) ? data.categories.map((item) => ({
+    ...item,
+    category_id: Number(item.category_id),
+    sort: Number(item.sort || 0) || 0,
+    knowledge_count: Number(item.knowledge_count || 0) || 0,
+    clause_count: Number(item.clause_count || 0) || 0,
+    verified_clause_count: Number(item.verified_clause_count || 0) || 0,
+    pending_clause_count: Number(item.pending_clause_count || 0) || 0,
+    rejected_clause_count: Number(item.rejected_clause_count || 0) || 0,
+    coverage_status: String(item.coverage_status || 'empty'),
+  })) : [],
+  is_empty: !!data.is_empty,
+  can_support_formal_assessment: !!data.can_support_formal_assessment,
+  message: String(data.message || '').trim(),
+})
+
 const getCategoryName = (categoryId) => (
   categories.value.find((item) => Number(item.id) === Number(categoryId))?.name || '未分类'
 )
@@ -476,6 +548,17 @@ const verificationText = (status) => {
 }
 
 const verificationClass = (status) => `verify-${String(status || 'pending')}`
+
+const coverageStatusText = (status) => {
+  const map = {
+    usable: '可用',
+    unverified: '待校验',
+    empty: '空',
+  }
+  return map[String(status || 'empty')] || '空'
+}
+
+const coverageStatusClass = (status) => `coverage-${String(status || 'empty')}`
 
 const parseStatusText = (status) => {
   const map = {
@@ -688,6 +771,7 @@ const importClauseCsv = async (file) => {
     })
     await fetchKnowledge()
     await fetchCategories()
+    await fetchCoverage()
   } catch (error) {
     showMessage(error?.message || '法规条文导入失败')
   } finally {
@@ -805,6 +889,7 @@ const saveKnowledge = async () => {
     form.value = createKnowledgeForm()
     await fetchKnowledge()
     await fetchCategories()
+    await fetchCoverage()
   } catch (error) {
     showMessage(error?.message || '知识文档保存失败')
   } finally {
@@ -824,6 +909,7 @@ const deleteKnowledge = (item) => {
         showMessage('知识文档已归档', 'success')
         await fetchKnowledge()
         await fetchCategories()
+        await fetchCoverage()
       } catch (error) {
         showMessage(error?.message || '知识文档归档失败')
       }
@@ -844,6 +930,7 @@ const batchDelete = () => {
         showMessage('知识文档已批量归档', 'success')
         await fetchKnowledge()
         await fetchCategories()
+        await fetchCoverage()
       } catch (error) {
         showMessage(error?.message || '批量归档失败')
       }
@@ -885,6 +972,7 @@ const saveCategory = async () => {
     categoryForm.value = createCategoryForm()
     await fetchCategories()
     await fetchKnowledge()
+    await fetchCoverage()
   } catch (error) {
     showMessage(error?.message || '知识分类保存失败')
   } finally {
@@ -906,6 +994,7 @@ const deleteCategory = (category) => {
         showMessage('知识分类已删除', 'success')
         await fetchCategories()
         await fetchKnowledge()
+        await fetchCoverage()
       } catch (error) {
         showMessage(error?.message || '知识分类删除失败')
       }
@@ -1012,6 +1101,128 @@ const deleteCategory = (category) => {
   margin-top: 5px;
   color: #8b98aa;
   font-size: 12px;
+}
+
+.coverage-alert {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #cce8d9;
+  border-radius: 12px;
+  background: #f1fbf6;
+}
+
+.coverage-alert.warning {
+  border-color: #ffe0a6;
+  background: #fff9eb;
+}
+
+.coverage-alert-title {
+  color: #22324c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.coverage-alert-text {
+  color: #657287;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.coverage-card {
+  margin-bottom: 14px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #edf1f7;
+  border-radius: 14px;
+}
+
+.coverage-header {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coverage-title {
+  display: block;
+  color: #24334e;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.coverage-subtitle {
+  display: block;
+  margin-top: 4px;
+  color: #8b98aa;
+  font-size: 12px;
+}
+
+.coverage-total {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 10px;
+  background: #eef6ff;
+  color: #1677ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.coverage-item {
+  padding: 11px 12px;
+  border: 1px solid #edf1f7;
+  border-radius: 10px;
+  background: #f9fbfd;
+}
+
+.coverage-item.coverage-usable {
+  border-color: #cce8d9;
+  background: #f5fcf8;
+}
+
+.coverage-item.coverage-unverified {
+  border-color: #ffe0a6;
+  background: #fffaf0;
+}
+
+.coverage-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.coverage-name {
+  overflow: hidden;
+  color: #2c3a55;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-status {
+  flex-shrink: 0;
+  color: #7f8ca0;
+  font-size: 10px;
+}
+
+.coverage-meta {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #8b98aa;
+  font-size: 10px;
 }
 
 .toolbar-card {

@@ -449,6 +449,7 @@ Authorization: Bearer <access_token>
 | 方法 | URL | 说明 |
 |------|-----|------|
 | POST | `/api/admin/knowledge/list` | 知识库列表 |
+| POST | `/api/admin/knowledge/coverage` | 14 类法规知识库覆盖率 |
 | POST | `/api/admin/knowledge/clauses/list` | 查询某个知识文档的结构化条款 |
 | POST | `/api/admin/knowledge/add` | 上传知识文件 |
 | POST | `/api/admin/knowledge/update` | 更新知识条目 |
@@ -481,6 +482,7 @@ Authorization: Bearer <access_token>
 |---|---|---|
 | `POST /api/admin/knowledge/list` | 无业务参数 | 页面初始化加载文档列表 |
 | `POST /api/admin/knowledge/clauses/list` | `knowledge_id` 或 `id` | 管理员检查某个文档的条款抽取结果 |
+| `POST /api/admin/knowledge/coverage` | 无业务参数 | 获取 14 类法规知识库覆盖率 |
 | `POST /api/admin/knowledge/clauses/import-csv` | Multipart：`file` | 批量导入法规条文 CSV |
 | `POST /api/admin/knowledge/add` | Multipart：`title`、`description`、`category_id`、`applicable_category_ids`、来源字段、`file` | 新增必须上传文件 |
 | `POST /api/admin/knowledge/update` | `id`、`title`、`description`、`category_id`、`applicable_category_ids`、来源字段 | 编辑但不更换文件 |
@@ -510,9 +512,11 @@ Authorization: Bearer <access_token>
 - CSV 导入字段固定为：分类、法规名称、文号/标准号、条款号、条文内容、关键词、官方来源URL、发布机关、施行日期、现行状态、备注
 - CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过
 - 命令行导入演示种子：`npm --prefix project/backend run import:legal-clauses`
+- 覆盖率接口按 14 类返回法规文件数、条文数、已校验条文数、未校验条文数和可用状态；空知识库时前端必须提示只能进行图片事实识别，不能出具法规判断
+- 覆盖率接口的 `summary.knowledge_count` 和 `summary.clause_count` 为全库唯一计数；分类卡片按适用分类统计，同一份通用法规关联多个分类时会分别体现到各分类
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
-- 本轮仅完成条款结构化入库和检查接口，不改变 AI 分析与报告引用流程；报告依据追溯由后续 PR 接入
+- 当前阶段已完成条款结构化入库、CSV 导入和知识库覆盖率看板；规则库数量和严格隐患判定由后续规则库 PR 接入
 
 知识列表页面需要的返回字段：
 
@@ -573,6 +577,43 @@ Authorization: Bearer <access_token>
       "status": "active"
     }
   ]
+}
+```
+
+覆盖率接口返回字段示例：
+
+```json
+{
+  "code": 0,
+  "success": true,
+  "msg": "ok",
+  "data": {
+    "summary": {
+      "category_count": 14,
+      "covered_category_count": 3,
+      "usable_category_count": 2,
+      "knowledge_count": 4,
+      "clause_count": 12,
+      "verified_clause_count": 8,
+      "pending_clause_count": 4,
+      "rejected_clause_count": 0
+    },
+    "categories": [
+      {
+        "category_id": 5,
+        "category_name": "消防安全",
+        "knowledge_count": 1,
+        "clause_count": 3,
+        "verified_clause_count": 2,
+        "pending_clause_count": 1,
+        "coverage_status": "usable",
+        "verified_ratio": 0.6667
+      }
+    ],
+    "is_empty": false,
+    "can_support_formal_assessment": true,
+    "message": "已有人工校验条文，可为后续规则判定和报告依据追溯提供基础。"
+  }
 }
 ```
 

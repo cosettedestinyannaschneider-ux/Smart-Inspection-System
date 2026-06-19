@@ -10,6 +10,7 @@ const request = require('supertest')
 
 const userService = require('../bll/userService')
 const authService = require('../bll/authService')
+const knowledgeService = require('../bll/knowledgeService')
 const modelConfigService = require('../bll/modelConfigService')
 const aiService = require('../bll/aiService')
 const docService = require('../bll/docService')
@@ -163,6 +164,33 @@ const app = (() => {
   patch(authService, 'logoutByJti', async () => undefined)
 
   patch(authService, 'createFileAccessToken', () => 'file-token')
+
+  patch(knowledgeService, 'getCoverage', async () => ({
+    summary: {
+      category_count: 14,
+      covered_category_count: 1,
+      usable_category_count: 1,
+      knowledge_count: 1,
+      clause_count: 3,
+      verified_clause_count: 2,
+      pending_clause_count: 1,
+      rejected_clause_count: 0,
+    },
+    categories: [{
+      category_id: 5,
+      category_name: '消防安全',
+      knowledge_count: 1,
+      clause_count: 3,
+      verified_clause_count: 2,
+      pending_clause_count: 1,
+      rejected_clause_count: 0,
+      coverage_status: 'usable',
+      verified_ratio: 0.6667,
+    }],
+    is_empty: false,
+    can_support_formal_assessment: true,
+    message: '已有人工校验条文，可为后续规则判定和报告依据追溯提供基础。',
+  }))
 
   patch(modelConfigService, 'listForClient', async () => ([{
     id: 3,
@@ -399,6 +427,21 @@ test('管理员模型配置接口使用管理员 Token 时可增查启用删除'
     .send({ id: 4 })
     .expect(200)
   assert.equal(deleteRes.body.code, ErrorCode.SUCCESS)
+})
+
+test('管理员知识库覆盖率接口返回可用性汇总', async () => {
+  const res = await request(app)
+    .post('/api/admin/knowledge/coverage')
+    .set('Authorization', 'Bearer admin-token')
+    .send({})
+    .expect(200)
+
+  assert.equal(res.body.code, ErrorCode.SUCCESS)
+  assert.equal(res.body.data.summary.category_count, 14)
+  assert.equal(res.body.data.summary.clause_count, 3)
+  assert.equal(res.body.data.can_support_formal_assessment, true)
+  assert.equal(res.body.data.categories[0].category_name, '消防安全')
+  assert.equal(res.body.data.categories[0].coverage_status, 'usable')
 })
 
 test('受控报告下载缺少鉴权时拒绝访问', async () => {

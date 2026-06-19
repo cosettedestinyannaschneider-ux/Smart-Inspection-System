@@ -4,6 +4,7 @@ const knowledgeDal = require('../dal/knowledgeDal')
 const knowledgeCategoryDal = require('../dal/knowledgeCategoryDal')
 const knowledgeCategoryRelationDal = require('../dal/knowledgeCategoryRelationDal')
 const knowledgeClauseDal = require('../dal/knowledgeClauseDal')
+const knowledgeCoverageDal = require('../dal/knowledgeCoverageDal')
 const { extractClauses } = require('./knowledgeClauseExtractService')
 const C = require('../common/Constants')
 const { resolveUploadAbsolutePath } = require('../common/fileAccess')
@@ -229,6 +230,28 @@ const parseApplicableCategoryIds = (record) => {
   return Array.from(new Set(ids))
 }
 
+/** 将覆盖率记录转换为前端展示结构 */
+const toClientCoverageItem = (record = {}) => {
+  const clauseCount = Number(record.clause_count || 0)
+  const verifiedClauseCount = Number(record.verified_clause_count || 0)
+  const pendingClauseCount = Number(record.pending_clause_count || 0)
+  const rejectedClauseCount = Number(record.rejected_clause_count || 0)
+  return {
+    category_id: Number(record.category_id),
+    category_name: record.category_name || '',
+    sort: Number(record.sort || 0),
+    knowledge_count: Number(record.knowledge_count || 0),
+    clause_count: clauseCount,
+    verified_clause_count: verifiedClauseCount,
+    pending_clause_count: pendingClauseCount,
+    rejected_clause_count: rejectedClauseCount,
+    coverage_status: clauseCount === 0
+      ? 'empty'
+      : (verifiedClauseCount > 0 ? 'usable' : 'unverified'),
+    verified_ratio: clauseCount > 0 ? Number((verifiedClauseCount / clauseCount).toFixed(4)) : 0,
+  }
+}
+
 /** 将知识库记录转换为前端可直接消费的结构 */
 const toClientKnowledge = (record) => {
   if (!record) return null
@@ -333,6 +356,41 @@ const knowledgeService = {
   /** 获取管理员知识库列表 */
   async listForAdmin() {
     return await this.listForClient()
+  },
+
+  /** 获取法规知识库覆盖率统计，供管理员判断当前条文库是否足以支撑 AI 判断 */
+  async getCoverage() {
+    const categories = (await knowledgeCoverageDal.findCategoryCoverage()).map(toClientCoverageItem)
+    const categorySummary = categories.reduce((total, item) => ({
+      category_count: total.category_count + 1,
+      covered_category_count: total.covered_category_count + (item.clause_count > 0 ? 1 : 0),
+      usable_category_count: total.usable_category_count + (item.verified_clause_count > 0 ? 1 : 0),
+    }), {
+      category_count: 0,
+      covered_category_count: 0,
+      usable_category_count: 0,
+    })
+    const globalSummary = await knowledgeCoverageDal.findGlobalCoverageSummary()
+    const summary = {
+      ...categorySummary,
+      knowledge_count: Number(globalSummary.knowledge_count || 0),
+      clause_count: Number(globalSummary.clause_count || 0),
+      verified_clause_count: Number(globalSummary.verified_clause_count || 0),
+      pending_clause_count: Number(globalSummary.pending_clause_count || 0),
+      rejected_clause_count: Number(globalSummary.rejected_clause_count || 0),
+    }
+
+    return {
+      summary,
+      categories,
+      is_empty: summary.clause_count === 0,
+      can_support_formal_assessment: summary.verified_clause_count > 0,
+      message: summary.clause_count === 0
+        ? '当前知识库没有结构化法规条文，只能进行图片事实识别，不能出具法规判断。'
+        : (summary.verified_clause_count === 0
+            ? '当前条文均未人工校验，只能用于整理和测试，不能直接作为正式报告结论。'
+            : '已有人工校验条文，可为后续规则判定和报告依据追溯提供基础。'),
+    }
   },
 
   /** 获取某个知识文档的结构化条款，供管理员检查抽取结果 */

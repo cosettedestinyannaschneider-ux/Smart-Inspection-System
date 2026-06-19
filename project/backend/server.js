@@ -844,6 +844,14 @@ app.post('/api/admin/knowledge/clauses/list', adminAuth, async (req, res) => {
   }
 })
 
+app.post('/api/admin/knowledge/coverage', adminAuth, async (req, res) => {
+  try {
+    res.success({ data: await knowledgeService.getCoverage() })
+  } catch (err) {
+    res.fail(err?.isKnowledgeError ? resolveKnowledgeErrorCode(err) : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
 app.post('/api/admin/knowledge/categories/list', adminAuth, async (req, res) => {
   try {
     res.success(await knowledgeService.listCategories())

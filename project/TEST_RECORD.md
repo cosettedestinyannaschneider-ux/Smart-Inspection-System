@@ -1,5 +1,37 @@
 # 功能测试记录
 
+## PR15：法规知识库覆盖率看板（2026-06-19）
+
+### 变更范围
+
+- 新增管理员知识库覆盖率接口 `POST /api/admin/knowledge/coverage`。
+- 覆盖率按固定 14 类法规分类统计法规文件数、结构化条文数、已校验条文数、待校验条文数和不采用条文数。
+- 管理端知识库页面新增覆盖率提示卡，空知识库或无已校验条文时明确提示不能出具正式法规判断。
+- 覆盖率卡片支持点击分类后联动筛选知识文档列表。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix E:\University\Project\project1.0\project\backend run check` 通过，`[syntax-check] passed: 54 files` | 通过 |
+| 后端自动化测试 | `npm --prefix E:\University\Project\project1.0\project\backend test` 通过，19 个用例全部通过 | 通过 |
+| 前端 H5 构建 | `npm --prefix E:\University\Project\project1.0\project\uni-app-frontend run build:h5` 通过，输出 `DONE Build complete` | 通过 |
+
+### 手动验证建议
+
+| 验证项 | 预期结果 | 状态 |
+|---|---|---|
+| 空知识库加载知识库管理页 | 页面显示“知识库依据不足”，提示只能进行图片事实识别，不能出具法规判断 | 待手动验证 |
+| 导入演示法规 CSV 后刷新页面 | 覆盖率卡片展示对应分类的文件数、条文数和已校验条文数 | 待手动验证 |
+| 点击覆盖率分类卡片 | 下方知识文档列表切换到对应分类筛选结果 | 待手动验证 |
+| 只有待校验条文时 | 页面提示条文只能用于整理和测试，不能直接作为正式报告结论 | 待手动验证 |
+
+### 风险说明
+
+- 本轮不新增 DDL，不修改 `.env`，不要求重建数据库。
+- 覆盖率接口只读取现有 `knowledge_categories`、`knowledge_category_relations`、`knowledge`、`knowledge_clauses` 数据。
+- 规则数统计依赖后续规则库模块，当前不展示伪造规则数据。
+
 ## PR14：法规条文 CSV 导入器与演示种子（2026-06-18）
 
 ### 变更范围
