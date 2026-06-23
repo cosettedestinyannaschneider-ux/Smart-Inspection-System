@@ -182,6 +182,13 @@ CREATE TABLE inspection_reports (
   pdf_path        VARCHAR(500)  DEFAULT NULL COMMENT 'PDF报告路径',
   image_path      VARCHAR(500)  DEFAULT NULL COMMENT '兼容旧单图报告的图片路径',
   status          ENUM('draft','completed') NOT NULL DEFAULT 'draft',
+  review_status   ENUM('pending','confirmed','rejected','needs_review') NOT NULL DEFAULT 'pending' COMMENT '人工复核状态',
+  review_required TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '是否需要人工确认',
+  review_comment  TEXT          DEFAULT NULL COMMENT '人工复核意见',
+  reviewed_by     INT           DEFAULT NULL COMMENT '复核人',
+  reviewed_at     DATETIME      DEFAULT NULL COMMENT '复核时间',
+  report_allowed  TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否允许生成正式报告',
+  report_block_reason VARCHAR(500) DEFAULT NULL COMMENT '禁止生成正式报告原因',
   created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -189,6 +196,8 @@ CREATE TABLE inspection_reports (
   KEY idx_ir_session_id (session_id),
   KEY idx_ir_enterprise_id (enterprise_id),
   KEY idx_ir_status (status),
+  KEY idx_ir_review_status (review_status),
+  KEY idx_ir_reviewed_by (reviewed_by),
   KEY idx_ir_created_at (created_at),
   CONSTRAINT fk_ir_user
     FOREIGN KEY (user_id) REFERENCES users (id)
@@ -198,6 +207,9 @@ CREATE TABLE inspection_reports (
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_ir_session
     FOREIGN KEY (session_id) REFERENCES sessions (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_ir_reviewed_by
+    FOREIGN KEY (reviewed_by) REFERENCES users (id)
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -398,9 +410,30 @@ CREATE TABLE inspection_report_knowledge_refs (
     FOREIGN KEY (report_id) REFERENCES inspection_reports (id)
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='报告引用依据快照表';
+-- ============================================================================
+-- 15. 报告-隐患规则引用快照表（报告判定规则可追溯）
+-- ============================================================================
+CREATE TABLE inspection_report_rule_refs (
+  id                   INT           NOT NULL AUTO_INCREMENT,
+  report_id            INT           NOT NULL COMMENT '所属排查报告',
+  rule_id              INT           DEFAULT NULL COMMENT '生成报告时命中的规则 ID',
+  rule_name            VARCHAR(200)  NOT NULL COMMENT '规则名称快照',
+  hazard_level         VARCHAR(50)   DEFAULT NULL COMMENT '规则判定等级快照',
+  evidence_sufficiency VARCHAR(50)   DEFAULT NULL COMMENT '证据充分性快照',
+  judgment_reason      TEXT          DEFAULT NULL COMMENT '判定理由快照',
+  sort                 INT           NOT NULL DEFAULT 0 COMMENT '引用展示顺序',
+  created_at           TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_irrr_report_id (report_id),
+  KEY idx_irrr_rule_id (rule_id),
+  KEY idx_irrr_sort (sort),
+  CONSTRAINT fk_irrr_report
+    FOREIGN KEY (report_id) REFERENCES inspection_reports (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='报告命中规则快照表';
 
 -- ============================================================================
--- 15. 隐患判定规则表（法规条文到隐患等级的人工规则映射）
+-- 16. 隐患判定规则表（法规条文到隐患等级的人工规则映射）
 -- ============================================================================
 CREATE TABLE hazard_rules (
   id                          INT           NOT NULL AUTO_INCREMENT,
@@ -430,7 +463,7 @@ CREATE TABLE hazard_rules (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='隐患判定规则表';
 
 -- ============================================================================
--- 16. 隐患规则-法规条款关联表
+-- 17. 隐患规则-法规条款关联表
 -- ============================================================================
 CREATE TABLE hazard_rule_clause_refs (
   rule_id    INT       NOT NULL COMMENT '规则ID',

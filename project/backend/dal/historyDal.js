@@ -1,4 +1,5 @@
 const db = require('./db')
+const C = require('../common/Constants')
 
 const historyDal = {
   /**
@@ -17,10 +18,12 @@ const historyDal = {
   async createHistory(userId, prompt, result, wordPath, pdfPath, imagePath = null, sessionId = null, opts = {}) {
     const [res] = await db.execute(
       `INSERT INTO inspection_reports
-       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, title)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, title, review_status, review_required, report_allowed, report_block_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, prompt, result, wordPath, pdfPath, imagePath, sessionId,
-       opts.enterpriseId || null, opts.title || null]
+       opts.enterpriseId || null, opts.title || null,
+       opts.reviewStatus || C.REPORT_REVIEW_PENDING, opts.reviewRequired ? 1 : 0,
+       opts.reportAllowed === false ? 0 : 1, opts.reportBlockReason || null]
     )
     return res.insertId
   },
@@ -69,10 +72,52 @@ const historyDal = {
     return rows
   },
 
-  async updateResult(id, result, wordPath = null, pdfPath = null) {
+  async updateResult(id, result, opts = {}) {
     return await db.execute(
-      'UPDATE inspection_reports SET result = ?, word_path = ?, pdf_path = ? WHERE id = ?',
-      [result, wordPath, pdfPath, id]
+      `UPDATE inspection_reports
+       SET result = ?, word_path = ?, pdf_path = ?, review_status = ?, review_required = ?,
+           review_comment = ?, reviewed_by = NULL, reviewed_at = NULL
+       WHERE id = ?`,
+      [
+        result,
+        opts.wordPath || null,
+        opts.pdfPath || null,
+        opts.reviewStatus || C.REPORT_REVIEW_PENDING,
+        opts.reviewRequired ? 1 : 0,
+        opts.reviewComment || null,
+        id,
+      ]
+    )
+  },
+
+  /** 更新正式报告文件路径和完成状态 */
+  async updateReportFiles(id, wordPath = null, pdfPath = null) {
+    return await db.execute(
+      `UPDATE inspection_reports
+       SET word_path = ?, pdf_path = ?, status = ?
+       WHERE id = ?`,
+      [wordPath, pdfPath, C.STATUS_COMPLETED, id]
+    )
+  },
+
+  /** 人工确认报告，允许后续生成正式 Word/PDF */
+  async confirmReview(id, reviewerId, comment = '') {
+    return await db.execute(
+      `UPDATE inspection_reports
+       SET review_status = ?, review_required = 0, review_comment = ?, reviewed_by = ?, reviewed_at = NOW()
+       WHERE id = ?`,
+      [C.REPORT_REVIEW_CONFIRMED, comment || null, reviewerId, id]
+    )
+  },
+
+  /** 退回或标记需复核，清空正式报告文件路径 */
+  async rejectReview(id, reviewerId, comment = '') {
+    return await db.execute(
+      `UPDATE inspection_reports
+       SET review_status = ?, review_required = 1, review_comment = ?, reviewed_by = ?, reviewed_at = NOW(),
+           word_path = NULL, pdf_path = NULL, status = ?
+       WHERE id = ?`,
+      [C.REPORT_REVIEW_NEEDS_REVIEW, comment || null, reviewerId, C.STATUS_DRAFT, id]
     )
   },
 

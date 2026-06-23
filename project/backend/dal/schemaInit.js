@@ -32,6 +32,7 @@ const schemaInit = {
     await this.step09KnowledgeClauses()
     await this.step09KnowledgeClauseDrafts()
     await this.step09InspectionReportKnowledgeRefs()
+    await this.step09InspectionReportRuleRefs()
     await this.step09HazardRules()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
@@ -328,6 +329,13 @@ const schemaInit = {
           pdf_path        VARCHAR(500)  DEFAULT NULL,
           image_path      VARCHAR(500)  DEFAULT NULL,
           status          VARCHAR(20)   NOT NULL DEFAULT 'completed',
+          review_status   VARCHAR(30)   NOT NULL DEFAULT 'pending',
+          review_required TINYINT(1)    NOT NULL DEFAULT 1,
+          review_comment  TEXT          DEFAULT NULL,
+          reviewed_by     INT           DEFAULT NULL,
+          reviewed_at     DATETIME      DEFAULT NULL,
+          report_allowed  TINYINT(1)    NOT NULL DEFAULT 0,
+          report_block_reason VARCHAR(500) DEFAULT NULL,
           created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           PRIMARY KEY (id),
@@ -346,6 +354,13 @@ const schemaInit = {
         'title VARCHAR(300) DEFAULT NULL',
         'image_path VARCHAR(500) DEFAULT NULL',
         "status VARCHAR(20) NOT NULL DEFAULT 'completed'",
+        "review_status VARCHAR(30) NOT NULL DEFAULT 'pending'",
+        'review_required TINYINT(1) NOT NULL DEFAULT 1',
+        'review_comment TEXT DEFAULT NULL',
+        'reviewed_by INT DEFAULT NULL',
+        'reviewed_at DATETIME DEFAULT NULL',
+        'report_allowed TINYINT(1) NOT NULL DEFAULT 0',
+        'report_block_reason VARCHAR(500) DEFAULT NULL',
         'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
       ]) {
         await this._addColumn('inspection_reports', colDef)
@@ -354,6 +369,8 @@ const schemaInit = {
       await this._addIndex('inspection_reports', 'idx_ir_session_id', 'KEY idx_ir_session_id (session_id)')
       await this._addIndex('inspection_reports', 'idx_ir_enterprise_id', 'KEY idx_ir_enterprise_id (enterprise_id)')
       await this._addIndex('inspection_reports', 'idx_ir_status', 'KEY idx_ir_status (status)')
+      await this._addIndex('inspection_reports', 'idx_ir_review_status', 'KEY idx_ir_review_status (review_status)')
+      await this._addIndex('inspection_reports', 'idx_ir_reviewed_by', 'KEY idx_ir_reviewed_by (reviewed_by)')
     }
 
     // 外键
@@ -363,6 +380,8 @@ const schemaInit = {
       'FOREIGN KEY (enterprise_id) REFERENCES enterprises (id) ON DELETE SET NULL ON UPDATE CASCADE')
     await this._addFK('inspection_reports', 'fk_ir_session',
       'FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('inspection_reports', 'fk_ir_reviewed_by',
+      'FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE')
   },
 
   // =========================================================================
@@ -710,6 +729,31 @@ const schemaInit = {
       'FOREIGN KEY (report_id) REFERENCES inspection_reports (id) ON DELETE CASCADE ON UPDATE CASCADE')
   },
 
+  // =========================================================================
+  // Step 9.7: 报告-规则快照（保证正式报告判定链可追溯）
+  // =========================================================================
+  async step09InspectionReportRuleRefs() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS inspection_report_rule_refs (
+        id                   INT           NOT NULL AUTO_INCREMENT,
+        report_id            INT           NOT NULL,
+        rule_id              INT           DEFAULT NULL,
+        rule_name            VARCHAR(200)  NOT NULL,
+        hazard_level         VARCHAR(50)   DEFAULT NULL,
+        evidence_sufficiency VARCHAR(50)   DEFAULT NULL,
+        judgment_reason      TEXT          DEFAULT NULL,
+        sort                 INT           NOT NULL DEFAULT 0,
+        created_at           TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_irrr_report_id (report_id),
+        KEY idx_irrr_rule_id (rule_id),
+        KEY idx_irrr_sort (sort)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await this._addFK('inspection_report_rule_refs', 'fk_irrr_report',
+      'FOREIGN KEY (report_id) REFERENCES inspection_reports (id) ON DELETE CASCADE ON UPDATE CASCADE')
+  },
   // =========================================================================
   // Step 9.8: 隐患判定规则库（法规条文到隐患等级的人工规则映射）
   // =========================================================================

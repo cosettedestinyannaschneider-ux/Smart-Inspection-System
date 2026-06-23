@@ -28,6 +28,7 @@ const departmentDal = require('./dal/departmentDal')
 const aiModelConfigDal = require('./dal/aiModelConfigDal')
 const inspectionReportImageDal = require('./dal/inspectionReportImageDal')
 const inspectionReportKnowledgeRefDal = require('./dal/inspectionReportKnowledgeRefDal')
+const inspectionReportRuleRefDal = require('./dal/inspectionReportRuleRefDal')
 
 // ---- 公共模块 ----
 const { responseMiddleware } = require('./common/Result')
@@ -310,11 +311,99 @@ const mapKnowledgeRefsForClient = (refs = []) => refs.map((ref) => ({
   match_keyword: ref.match_keyword || '',
 }))
 
+
+/** 将报告命中规则快照映射为前端展示结构 */
+const mapRuleRefsForClient = (refs = []) => refs.map((ref) => ({
+  id: Number(ref.id || ref.rule_id || 0),
+  rule_id: ref.rule_id ? Number(ref.rule_id) : (ref.id ? Number(ref.id) : null),
+  rule_name: ref.rule_name || ref.name || '',
+  name: ref.rule_name || ref.name || '',
+  hazard_level: ref.hazard_level || '',
+  evidence_sufficiency: ref.evidence_sufficiency || '',
+  judgment_reason: ref.judgment_reason || ref.reason || '',
+}))
+
+/** 安全解析报告结果 JSON */
+const parseReportResult = (result) => {
+  try { return JSON.parse(String(result || '').trim()) }
+  catch { return null }
+}
+
+/** 从结构化分析结果推断复核与正式报告生成状态 */
+const buildReviewStateFromAssessment = (assessment) => {
+  const reportAllowed = assessment?.report_allowed !== false
+  const reviewRequired = assessment?.review_required !== false
+  const blockReason = assessment?.report_block_reason || (reviewRequired ? 'AI 初判结果需要人工确认后才能生成正式报告。' : '')
+  return {
+    reportAllowed,
+    reviewRequired,
+    reviewStatus: reportAllowed ? C.REPORT_REVIEW_PENDING : C.REPORT_REVIEW_NEEDS_REVIEW,
+    reportBlockReason: blockReason,
+  }
+}
+
+/** 从分析结果中提取命中规则快照 */
+const extractRuleRefsFromAssessment = (assessment) => {
+  const rules = Array.isArray(assessment?.matched_rules) ? assessment.matched_rules : []
+  const itemRules = Array.isArray(assessment?.items)
+    ? assessment.items.flatMap((item) => (item.matched_rules || []).map((rule) => ({
+        ...rule,
+        evidence_sufficiency: item.evidence_sufficiency,
+        judgment_reason: item.hazard_description,
+      })))
+    : []
+  const map = new Map()
+  ;[...rules, ...itemRules].forEach((rule) => {
+    const key = Number(rule.id || rule.rule_id || 0) || String(rule.name || rule.rule_name || '')
+    if (!key || map.has(key)) return
+    map.set(key, rule)
+  })
+  return Array.from(map.values())
+}
+
+/** 查询报告关联图片的绝对路径，用于确认后生成正式报告 */
+const resolveReportImagePaths = async (reportId) => {
+  const linkedImages = await inspectionReportImageDal.findByReportId(reportId)
+  return linkedImages
+    .map((img) => img.file_path ? path.join(C.UPLOAD_DIR, String(img.file_path)) : null)
+    .filter(Boolean)
+}
+
+/** 根据报告记录生成正式 Word/PDF，并写回报告路径 */
+const generateFormalReportForRecord = async (record, resultOverride = null) => {
+  const result = resultOverride || record.result || ''
+  const reportImages = await resolveReportImagePaths(record.id)
+  let wordPath = null
+  let pdfPath = null
+  if (record.enterprise_id) {
+    const enterprise = await enterpriseDal.findById(record.enterprise_id)
+    if (enterprise) {
+      wordPath = await docService.generateTemplateReport({
+        enterprise,
+        prompt: record.prompt,
+        result,
+        imagePaths: reportImages,
+      })
+      pdfPath = await docService.generateTemplatePDF({
+        enterprise,
+        prompt: record.prompt,
+        result,
+        imagePaths: reportImages,
+        wordPath,
+      })
+    }
+  }
+  if (!wordPath) wordPath = await docService.generateWord(record.prompt, result, reportImages)
+  if (!pdfPath) pdfPath = await docService.generatePDF(record.prompt, result, reportImages, { wordPath })
+  await historyDal.updateReportFiles(record.id, wordPath, pdfPath)
+  return { wordPath, pdfPath }
+}
 /** 将数据库记录中的文件路径转为当前接口应暴露的受控地址 */
-const mapHistoryRecordForClient = (req, record, knowledgeRefs = []) => ({
+const mapHistoryRecordForClient = (req, record, knowledgeRefs = [], ruleRefs = []) => ({
   ...record,
   image_path: record.image_path ? buildReportImagePreviewUrl(req, record.id) : null,
   knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
+  rule_refs: mapRuleRefsForClient(ruleRefs),
   ...buildReportDownloadUrls(req, record.id, record.word_path, record.pdf_path),
 })
 
@@ -322,7 +411,8 @@ const mapHistoryRecordForClient = (req, record, knowledgeRefs = []) => ({
 const mapHistoryRecordsForClient = async (req, records = []) => {
   const reportIds = records.map((record) => Number(record.id)).filter((id) => id > 0)
   const refMap = await inspectionReportKnowledgeRefDal.findByReportIds(reportIds)
-  return records.map((record) => mapHistoryRecordForClient(req, record, refMap.get(Number(record.id)) || []))
+  const ruleMap = await inspectionReportRuleRefDal.findByReportIds(reportIds)
+  return records.map((record) => mapHistoryRecordForClient(req, record, refMap.get(Number(record.id)) || [], ruleMap.get(Number(record.id)) || []))
 }
 
 /** 安全发送本地上传文件 */
@@ -551,43 +641,25 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       prompt, sessionId, enterprise, images: aiImages, userId, modelId,
     })
 
-    const imageAbsPaths = aiImages.map((i) => i.absPath)
-    let parsedAssessment = null
-    try { parsedAssessment = JSON.parse(result) } catch { parsedAssessment = null }
-    const reportAllowed = parsedAssessment?.report_allowed !== false
 
-    // 只有规则评估允许时才生成正式 Word/PDF，非业务图片和无规则依据只保留分析记录。
-    let wordPath = null
-    let pdfPath = null
-    if (reportAllowed) {
-      if (enterprise) {
-        wordPath = await docService.generateTemplateReport({
-          enterprise,
-          prompt,
-          result,
-          imagePaths: imageAbsPaths,
-        })
-        pdfPath = await docService.generateTemplatePDF({
-          enterprise,
-          prompt,
-          result,
-          imagePaths: imageAbsPaths,
-          wordPath,
-        })
-      } else {
-        wordPath = await docService.generateWord(prompt, result, imageAbsPaths)
-        pdfPath = await docService.generatePDF(prompt, result, imageAbsPaths)
-      }
-    }
+    const parsedAssessment = parseReportResult(result)
+    const reviewState = buildReviewStateFromAssessment(parsedAssessment)
+    const ruleRefs = extractRuleRefsFromAssessment(parsedAssessment)
 
+    // 分析阶段只保存 AI 初判和依据快照，正式 Word/PDF 必须人工确认后生成。
     const firstImagePath = images[0]?.file_path || null
-    const historyId = await historyDal.createHistory(userId, prompt, result, wordPath, pdfPath, firstImagePath, newSessionId, {
+    const historyId = await historyDal.createHistory(userId, prompt, result, null, null, firstImagePath, newSessionId, {
       enterpriseId: enterpriseId || (enterprise ? enterprise.id : null),
-      title: enterprise ? `${enterprise.name} - 隐患排查报告` : null,
+      title: enterprise ? enterprise.name + ' - 隐患排查报告' : null,
+      reviewStatus: reviewState.reviewStatus,
+      reviewRequired: reviewState.reviewRequired,
+      reportAllowed: reviewState.reportAllowed,
+      reportBlockReason: reviewState.reportBlockReason,
     })
 
     await inspectionReportImageDal.linkImages(historyId, imageIds)
     await inspectionReportKnowledgeRefDal.replaceByReportId(historyId, knowledgeRefs)
+    await inspectionReportRuleRefDal.replaceByReportId(historyId, ruleRefs)
     await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, {
       count: images.length,
       knowledge_ref_count: knowledgeRefs.length,
@@ -598,9 +670,12 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       sessionId: newSessionId,
       id: historyId,
       knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
-      report_allowed: reportAllowed,
-      report_block_reason: parsedAssessment?.report_block_reason || '',
-      ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
+      report_allowed: reviewState.reportAllowed,
+      report_block_reason: reviewState.reportBlockReason,
+      review_status: reviewState.reviewStatus,
+      review_required: reviewState.reviewRequired,
+      rule_refs: mapRuleRefsForClient(ruleRefs),
+      ...buildReportDownloadUrls(req, historyId, null, null),
     })
   } catch (err) {
     console.error('[Server] hazard analyze error:', err)
@@ -726,53 +801,92 @@ app.post('/api/history/update-result', requireAuth, requirePermission('analysis:
     if (!record) return res.fail(ErrorCode.RECORD_NOT_FOUND)
     if (record.user_id !== userId) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限修改此记录')
 
-    let reportImages = record.image_path
-    try {
-      const parsed = JSON.parse(String(result).trim())
-      const selectedImages = await inspectionReportImageDal.findByReportId(id)
-      const ids = selectedImages.map((item) => Number(item.id)).filter((v) => Number.isFinite(v) && v > 0)
-      if (ids.length) {
-        const imgs = await hazardImageDal.findByIds(userId, ids)
-        reportImages = imgs.map((img) => path.join(C.UPLOAD_DIR, String(img.file_path || '')))
-      }
-    } catch (e) { /* JSON 解析失败则保持原样 */ }
+    const parsedAssessment = parseReportResult(result)
+    const reviewState = buildReviewStateFromAssessment(parsedAssessment)
+    const ruleRefs = extractRuleRefsFromAssessment(parsedAssessment)
 
-    // 如果关联了企业，使用模板化报告
-    let wordPath, pdfPath
-    if (record.enterprise_id) {
-      const enterprise = await enterpriseDal.findById(record.enterprise_id)
-      if (enterprise) {
-        wordPath = await docService.generateTemplateReport({
-          enterprise,
-          prompt: record.prompt,
-          result,
-          imagePaths: Array.isArray(reportImages) ? reportImages : [],
-        })
-        pdfPath = await docService.generateTemplatePDF({
-          enterprise,
-          prompt: record.prompt,
-          result,
-          imagePaths: Array.isArray(reportImages) ? reportImages : [],
-          wordPath,
-        })
-      } else {
-        wordPath = await docService.generateWord(record.prompt, result, reportImages)
-        pdfPath = await docService.generatePDF(record.prompt, result, reportImages)
-      }
-    } else {
-      wordPath = await docService.generateWord(record.prompt, result, reportImages)
-      pdfPath = await docService.generatePDF(record.prompt, result, reportImages, { wordPath })
-    }
+    await historyDal.updateResult(id, result, {
+      reviewStatus: reviewState.reviewStatus,
+      reviewRequired: reviewState.reviewRequired,
+      reviewComment: '分析结果已编辑，需重新人工确认后生成正式报告。',
+    })
+    await inspectionReportKnowledgeRefDal.replaceByReportId(id, parsedAssessment?.legal_refs || parsedAssessment?.reference_standards || [])
+    await inspectionReportRuleRefDal.replaceByReportId(id, ruleRefs)
+    await logDal.logAction(userId, C.ACTION_UPDATE_INSPECTION_RESULT, { id, review_status: reviewState.reviewStatus }, req.ip)
 
-    await historyDal.updateResult(id, result, wordPath, pdfPath)
-    await logDal.logAction(userId, C.ACTION_UPDATE_INSPECTION_RESULT, { id }, req.ip)
-    res.success(buildReportDownloadUrls(req, id, wordPath, pdfPath), '保存成功')
+    res.success({
+      ...buildReportDownloadUrls(req, id, null, null),
+      review_status: reviewState.reviewStatus,
+      review_required: reviewState.reviewRequired,
+      report_allowed: reviewState.reportAllowed,
+      report_block_reason: reviewState.reportBlockReason,
+      rule_refs: mapRuleRefsForClient(ruleRefs),
+    }, '保存成功，正式报告需人工确认后生成')
   } catch (err) {
     console.error('[Server] update result error:', err)
     res.fail(ErrorCode.INTERNAL_ERROR, err.message)
   }
 })
 
+/** 校验当前用户是否可以操作指定报告 */
+const canOperateReport = (req, record) => {
+  const userId = getAuthUserId(req)
+  return req.auth?.user?.role === C.ROLE_ADMIN || Number(record?.user_id) === userId
+}
+
+app.post('/api/history/review/confirm', requireAuth, requirePermission('analysis:run'), async (req, res) => {
+  const id = Number(req.body.id)
+  const comment = String(req.body.comment || '').trim()
+  const userId = getAuthUserId(req)
+  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
+
+  try {
+    const record = await historyDal.findById(id)
+    if (!record) return res.fail(ErrorCode.RECORD_NOT_FOUND)
+    if (!canOperateReport(req, record)) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限确认此报告')
+    if (Number(record.report_allowed) === 0) {
+      return res.fail(ErrorCode.PARAM_INVALID, record.report_block_reason || '当前分析结果不允许生成正式报告')
+    }
+
+    await historyDal.confirmReview(id, userId, comment)
+    const updatedRecord = { ...record, review_status: C.REPORT_REVIEW_CONFIRMED, review_required: 0 }
+    const { wordPath, pdfPath } = await generateFormalReportForRecord(updatedRecord)
+    await logDal.logAction(userId, C.ACTION_CONFIRM_INSPECTION_REPORT, { id, has_word: !!wordPath, has_pdf: !!pdfPath }, req.ip)
+
+    res.success({
+      review_status: C.REPORT_REVIEW_CONFIRMED,
+      review_required: false,
+      ...buildReportDownloadUrls(req, id, wordPath, pdfPath),
+    }, '已确认并生成正式报告')
+  } catch (err) {
+    console.error('[Server] confirm report error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.post('/api/history/review/reject', requireAuth, requirePermission('analysis:run'), async (req, res) => {
+  const id = Number(req.body.id)
+  const comment = String(req.body.comment || '').trim()
+  const userId = getAuthUserId(req)
+  if (!id) return res.fail(ErrorCode.PARAM_MISSING)
+
+  try {
+    const record = await historyDal.findById(id)
+    if (!record) return res.fail(ErrorCode.RECORD_NOT_FOUND)
+    if (!canOperateReport(req, record)) return res.fail(ErrorCode.PERMISSION_DENIED, '无权限退回此报告')
+
+    await historyDal.rejectReview(id, userId, comment || '人工退回，需补充信息或重新分析。')
+    await logDal.logAction(userId, C.ACTION_REJECT_INSPECTION_REPORT, { id }, req.ip)
+    res.success({
+      review_status: C.REPORT_REVIEW_NEEDS_REVIEW,
+      review_required: true,
+      ...buildReportDownloadUrls(req, id, null, null),
+    }, '已退回，正式报告已锁定')
+  } catch (err) {
+    console.error('[Server] reject report error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
 // =========================================================================
 // 报告管理（9.7）
 // =========================================================================
@@ -788,6 +902,7 @@ app.post('/api/history/delete', requireAuth, requirePermission('report:download'
 
     await inspectionReportImageDal.unlinkAll(id)
     await inspectionReportKnowledgeRefDal.deleteByReportId(id)
+    await inspectionReportRuleRefDal.deleteByReportId(id)
     await historyDal.deleteById(userId, id)
 
     if (record.word_path) fs.unlink(resolveUploadAbsolutePath(C.UPLOAD_DIR, record.word_path), () => {})
