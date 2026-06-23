@@ -508,15 +508,15 @@ Authorization: Bearer <access_token>
 - 自动抽取的条款写入 `knowledge_clauses`，单文档最多自动保留 300 条，单条内容最多保留 4000 字符
 - `knowledge.parse_status` 记录抽取状态：`pending`、`parsed`、`skipped`、`failed`
 - `knowledge.parse_message` 记录跳过原因或失败原因，便于管理员复核
-- CSV 导入模板位于 `project/database/legal_clause_import_template.csv`，演示种子位于 `project/database/legal_clause_seed.csv`
+- CSV 导入模板位于 `project/database/legal_clause_import_template.csv`，演示种子位于 `project/database/legal_clause_seed.csv`，第一批正式法规标准条文位于 `project/database/legal_clause_official.csv`
 - CSV 导入字段固定为：分类、法规名称、文号/标准号、条款号、条文内容、关键词、官方来源URL、发布机关、施行日期、现行状态、备注
-- CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过
-- 命令行导入演示种子：`npm --prefix project/backend run import:legal-clauses`
+- CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过。命令行导入前会自动执行质量校验，阻断缺表头、非法分类、`local://` 来源、必填字段缺失和 CSV 内重复条款
+- 命令行校验正式 CSV：`npm --prefix project/backend run validate:legal-clauses`；命令行导入演示种子：`npm --prefix project/backend run import:legal-clauses`；导入正式 CSV：`npm --prefix project/backend run import:legal-clauses -- project/database/legal_clause_official.csv`
 - 覆盖率接口按 14 类返回法规文件数、条文数、已校验条文数、未校验条文数和可用状态；空知识库时前端必须提示只能进行图片事实识别，不能出具法规判断
 - 覆盖率接口的 `summary.knowledge_count` 和 `summary.clause_count` 为全库唯一计数；分类卡片按适用分类统计，同一份通用法规关联多个分类时会分别体现到各分类
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
-- 当前阶段已完成条款结构化入库、CSV 导入和知识库覆盖率看板；规则库数量和严格隐患判定由后续规则库 PR 接入
+- 当前阶段已完成条款结构化入库、CSV 导入、正式 CSV 数据资产和知识库覆盖率看板；规则库数量和严格隐患判定由后续规则库 PR 接入
 
 知识列表页面需要的返回字段：
 
