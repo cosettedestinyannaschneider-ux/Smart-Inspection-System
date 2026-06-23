@@ -41,6 +41,7 @@ const findRefsByRuleIds = async (ruleIds = []) => {
        r.rule_id,
        r.clause_id,
        r.sort,
+       c.knowledge_id,
        c.source_title,
        c.source_code,
        c.clause_no,
@@ -62,6 +63,7 @@ const findRefsByRuleIds = async (ruleIds = []) => {
     map.get(ruleId).push({
       clause_id: Number(row.clause_id),
       sort: Number(row.sort || 0),
+      knowledge_id: row.knowledge_id ? Number(row.knowledge_id) : null,
       source_title: row.source_title,
       source_code: row.source_code,
       clause_no: row.clause_no,
@@ -303,6 +305,41 @@ const hazardRuleDal = {
     return rows
   },
 
+
+  /** 查询后续 AI 判定可使用的启用规则，未启用草稿不会进入正式候选 */
+  async findActiveForAssessment({ category_id = null, limit = 200 } = {}) {
+    const where = [
+      'r.status = \'active\'',
+      'r.is_active = 1',
+    ]
+    const params = []
+    if (category_id) {
+      where.push('r.category_id = ?')
+      params.push(Number(category_id))
+    }
+
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 200, 500))
+    const [rows] = await db.execute(
+      `SELECT
+         r.*,
+         c.name AS category_name,
+         COUNT(ref.clause_id) AS clause_ref_count
+       FROM hazard_rules r
+       LEFT JOIN knowledge_categories c ON c.id = r.category_id
+       LEFT JOIN hazard_rule_clause_refs ref ON ref.rule_id = r.id
+       WHERE ${where.join(' AND ')}
+       GROUP BY r.id
+       ORDER BY r.category_id ASC, r.id ASC
+       LIMIT ${safeLimit}`,
+      params
+    )
+
+    const rules = rows.map(mapRuleRow)
+    const refMap = await findRefsByRuleIds(rules.map((item) => item.id))
+    return rules
+      .map((rule) => ({ ...rule, clause_refs: refMap.get(rule.id) || [] }))
+      .filter((rule) => rule.clause_refs.length > 0)
+  },
   /** 种子规则按关键词匹配本地已校验条款 */
   async searchVerifiedClausesForSeed({ category_id = null, keywords = [], limit = 5 } = {}) {
     const cleanedKeywords = Array.from(new Set(

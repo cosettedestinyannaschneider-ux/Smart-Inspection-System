@@ -552,25 +552,32 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     })
 
     const imageAbsPaths = aiImages.map((i) => i.absPath)
-    // 使用模板化报告（优先），降级到旧方法
-    let wordPath, pdfPath
-    if (enterprise) {
-      wordPath = await docService.generateTemplateReport({
-        enterprise,
-        prompt,
-        result,
-        imagePaths: imageAbsPaths,
-      })
-      pdfPath = await docService.generateTemplatePDF({
-        enterprise,
-        prompt,
-        result,
-        imagePaths: imageAbsPaths,
-        wordPath,
-      })
-    } else {
-      wordPath = await docService.generateWord(prompt, result, imageAbsPaths)
-      pdfPath = await docService.generatePDF(prompt, result, imageAbsPaths)
+    let parsedAssessment = null
+    try { parsedAssessment = JSON.parse(result) } catch { parsedAssessment = null }
+    const reportAllowed = parsedAssessment?.report_allowed !== false
+
+    // 只有规则评估允许时才生成正式 Word/PDF，非业务图片和无规则依据只保留分析记录。
+    let wordPath = null
+    let pdfPath = null
+    if (reportAllowed) {
+      if (enterprise) {
+        wordPath = await docService.generateTemplateReport({
+          enterprise,
+          prompt,
+          result,
+          imagePaths: imageAbsPaths,
+        })
+        pdfPath = await docService.generateTemplatePDF({
+          enterprise,
+          prompt,
+          result,
+          imagePaths: imageAbsPaths,
+          wordPath,
+        })
+      } else {
+        wordPath = await docService.generateWord(prompt, result, imageAbsPaths)
+        pdfPath = await docService.generatePDF(prompt, result, imageAbsPaths)
+      }
     }
 
     const firstImagePath = images[0]?.file_path || null
@@ -591,6 +598,8 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       sessionId: newSessionId,
       id: historyId,
       knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
+      report_allowed: reportAllowed,
+      report_block_reason: parsedAssessment?.report_block_reason || '',
       ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
     })
   } catch (err) {
