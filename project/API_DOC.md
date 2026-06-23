@@ -155,7 +155,7 @@
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String), `session_id` (String, 可选), `model_id` (Number, 可选), `file` (File, 可选)
-- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs }`
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs, report_allowed, report_block_reason }`
 
 > 业务范围：纯文本请求会进行安全生产业务范围保底判断。与安全检查、隐患分析、整改建议、法规标准、企业安全管理或报告生成无关的问题会返回业务范围提示，不生成 Word/PDF 报告。
 >
@@ -169,7 +169,7 @@
 - **请求头**: `Authorization: Bearer <access_token>`
 - **权限**: `analysis:run`
 - **参数**: `prompt` (String, 可选), `session_id` (String, 可选), `image_ids` (Number[]), `enterprise_id` (Number, 可选), `model_id` (Number, 可选)
-- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs }`
+- **返回**: `{ code: 0, result, wordPath, pdfPath, sessionId, id, knowledge_refs, report_allowed, report_block_reason }`
 
 > 图片顺序：后端按 `image_ids` 的传入顺序读取图片，并要求 AI 结果中的 `image_id` 与该顺序一致，避免报告中的“图片 1/2/3”与用户选择顺序错位。
 >
@@ -504,6 +504,27 @@ Authorization: Bearer <access_token>
 | `POST /api/admin/knowledge/rules/toggle` | `id`、`is_active` | 启用或停用规则 |
 | `POST /api/admin/knowledge/rules/archive` | `id` | 归档规则，归档后不参与判定 |
 | `POST /api/admin/knowledge/rules/import-seed` | 无业务参数 | 按本地已校验条文导入高频隐患规则种子包 |
+
+
+#### PR19 规则驱动分析字段
+
+`POST /api/hazard/analyze` 的 `result` 现在为规则驱动初判 JSON，核心字段：
+
+- `scene_status`：`related`、`unrelated`、`uncertain`，表示图片是否属于安全生产检查场景。
+- `visible_facts` / `image_facts`：AI 仅抽取图片可见事实，不直接判定重大/一般。
+- `matched_rules`：后端命中的本地启用规则，规则必须已关联已校验正式条文。
+- `legal_refs` / `reference_standards`：从命中规则关联条文生成的依据快照。
+- `hazard_level`：由后端规则和证据充分性决定，可能为 `非业务图片`、`需人工复核`、`一般隐患`、`疑似重大隐患`、`重大隐患`。
+- `evidence_sufficiency`：`sufficient`、`partial`、`insufficient`、`not_applicable`。
+- `review_required`：是否需要人工确认。
+- `report_allowed`：是否允许生成正式 Word/PDF 报告；非业务图片、未命中启用规则、证据不足时为 `false`。
+- `report_block_reason`：不生成正式报告的原因。
+
+约束：
+
+- AI 只负责场景门控和事实抽取，不再直接拥有最终隐患等级定性权。
+- 没有本地启用规则或规则缺少已校验条文时，只能输出“需人工复核”，不生成正式报告。
+- 当前 PR 只改造多图正式分析入口 `/api/hazard/analyze`；旧 `/api/process` 保持兼容。
 
 知识库管理规则：
 

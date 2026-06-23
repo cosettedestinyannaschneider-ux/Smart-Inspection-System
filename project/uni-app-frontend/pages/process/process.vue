@@ -116,6 +116,31 @@
                     <text class="struct-title">分析结果</text>
                     <text class="struct-subtitle">{{ parseStructuredData(msg.content).mode === 'multi' ? '多图隐患分析' : '单项隐患分析' }}</text>
                   </view>
+                  <view
+                    v-if="parseStructuredData(msg.content).scene_status || parseStructuredData(msg.content).report_allowed === false"
+                    class="assessment-panel"
+                    :class="{ blocked: parseStructuredData(msg.content).report_allowed === false }"
+                  >
+                    <view class="assessment-top">
+                      <text class="assessment-title">规则初判摘要</text>
+                      <text class="assessment-status" :class="sceneStatusClass(parseStructuredData(msg.content).scene_status)">
+                        {{ sceneStatusText(parseStructuredData(msg.content).scene_status) }}
+                      </text>
+                    </view>
+                    <view class="assessment-tags">
+                      <text class="assessment-tag">等级：{{ parseStructuredData(msg.content).hazard_level || '需人工复核' }}</text>
+                      <text class="assessment-tag">证据：{{ evidenceText(parseStructuredData(msg.content).evidence_sufficiency) }}</text>
+                      <text class="assessment-tag">{{ parseStructuredData(msg.content).review_required ? '需人工确认' : '可进入报告' }}</text>
+                    </view>
+                    <text v-if="parseStructuredData(msg.content).scene_reason" class="assessment-reason">{{ parseStructuredData(msg.content).scene_reason }}</text>
+                    <text v-if="parseStructuredData(msg.content).report_allowed === false" class="assessment-block">{{ parseStructuredData(msg.content).report_block_reason || '当前结果不生成正式报告。' }}</text>
+                    <view v-if="parseStructuredData(msg.content).visible_facts.length" class="fact-row">
+                      <text v-for="(fact, factIndex) in parseStructuredData(msg.content).visible_facts.slice(0, 6)" :key="factIndex" class="fact-chip">{{ fact }}</text>
+                    </view>
+                    <view v-if="parseStructuredData(msg.content).matched_rules.length" class="rule-row">
+                      <text v-for="rule in parseStructuredData(msg.content).matched_rules.slice(0, 4)" :key="rule.id || rule.name" class="rule-chip">{{ rule.name }}</text>
+                    </view>
+                  </view>
                   <view v-if="!msg.isEditing">
                      <view v-if="parseStructuredData(msg.content).mode === 'single'">
                        <view class="struct-grid">
@@ -628,6 +653,48 @@ const formatReferenceStandardTitle = (ref) => {
 /** 获取当前消息可展示的引用依据，优先使用后端保存的本地知识库快照 */
 const getDisplayKnowledgeRefs = (msg) => normalizeKnowledgeRefs(msg?.knowledgeRefs || msg?.knowledge_refs || [])
 
+/** 将规则驱动初判字段附加到结构化展示数据 */
+const attachAssessmentFields = (target, data) => ({
+  ...target,
+  scene_status: data.scene_status || '',
+  scene_reason: data.scene_reason || '',
+  visible_facts: Array.isArray(data.visible_facts) ? data.visible_facts : [],
+  uncertain_points: Array.isArray(data.uncertain_points) ? data.uncertain_points : [],
+  matched_rules: Array.isArray(data.matched_rules) ? data.matched_rules : [],
+  legal_refs: Array.isArray(data.legal_refs) ? data.legal_refs : [],
+  evidence_sufficiency: data.evidence_sufficiency || '',
+  hazard_level: data.hazard_level || '',
+  review_required: !!data.review_required,
+  report_allowed: data.report_allowed,
+  report_block_reason: data.report_block_reason || '',
+})
+
+/** 场景状态展示文案 */
+const sceneStatusText = (status) => {
+  const map = {
+    related: '业务场景',
+    unrelated: '非业务图片',
+    non_business: '非业务图片',
+    irrelevant: '非业务图片',
+    uncertain: '需复核场景',
+  }
+  return map[String(status || 'uncertain')] || '需复核场景'
+}
+
+/** 场景状态样式 */
+const sceneStatusClass = (status) => `scene-${String(status || 'uncertain')}`
+
+/** 证据充分性展示文案 */
+const evidenceText = (status) => {
+  const map = {
+    sufficient: '充分',
+    partial: '部分充分',
+    insufficient: '不足',
+    not_applicable: '不适用',
+  }
+  return map[String(status || 'insufficient')] || '不足'
+}
+
 // 尝试解析结构化数据 (9.6 智能隐患分析模块)
 const parseStructuredData = (content) => {
   if (!content) return null
@@ -647,22 +714,22 @@ const parseStructuredData = (content) => {
     // 2) 多图结构化：{ items: [{ image_id, hazard_description, basis, suggestion }] }
     if (data && typeof data === 'object') {
       if (Array.isArray(data.items)) {
-        return {
+        return attachAssessmentFields({
           mode: 'multi',
           items: data.items,
           reference_standards: Array.isArray(data.reference_standards) ? data.reference_standards : [],
           comprehensive_opinion: data.comprehensive_opinion || null,
-        }
+        }, data)
       }
       if (data.hazard_description) {
-        return {
+        return attachAssessmentFields({
           mode: 'single',
           hazard_description: data.hazard_description,
           basis: data.basis || '',
           suggestion: data.suggestion || '',
           reference_standards: Array.isArray(data.reference_standards) ? data.reference_standards : [],
           comprehensive_opinion: data.comprehensive_opinion || null,
-        }
+        }, data)
       }
     }
   } catch (e) {
@@ -670,6 +737,21 @@ const parseStructuredData = (content) => {
   }
   return null
 }
+
+/** 保存编辑结果时保留规则初判字段，避免编辑正文后丢失依据追溯和报告拦截状态 */
+const buildAssessmentFieldsForSave = (data = {}) => ({
+  scene_status: data.scene_status || '',
+  scene_reason: data.scene_reason || '',
+  visible_facts: Array.isArray(data.visible_facts) ? data.visible_facts : [],
+  uncertain_points: Array.isArray(data.uncertain_points) ? data.uncertain_points : [],
+  matched_rules: Array.isArray(data.matched_rules) ? data.matched_rules : [],
+  legal_refs: Array.isArray(data.legal_refs) ? data.legal_refs : [],
+  evidence_sufficiency: data.evidence_sufficiency || '',
+  hazard_level: data.hazard_level || '',
+  review_required: !!data.review_required,
+  report_allowed: data.report_allowed,
+  report_block_reason: data.report_block_reason || '',
+})
 
 // 开始编辑结果
 const startEditResult = (msg) => {
@@ -691,11 +773,13 @@ const saveEditResult = (msg) => {
   if (!msg.id) return uni.showToast({ title: '无法保存，缺少记录ID', icon: 'none' })
   savingResult.value = true
   const originalData = parseStructuredData(msg.content) || {}
+  const assessmentFields = buildAssessmentFieldsForSave(originalData)
   const payload = msg.editData?.mode === 'multi'
     ? {
         items: msg.editData.items,
         reference_standards: originalData.reference_standards || [],
         comprehensive_opinion: originalData.comprehensive_opinion || null,
+        ...assessmentFields,
       }
     : {
         hazard_description: msg.editData.hazard_description,
@@ -703,6 +787,7 @@ const saveEditResult = (msg) => {
         suggestion: msg.editData.suggestion,
         reference_standards: originalData.reference_standards || [],
         comprehensive_opinion: originalData.comprehensive_opinion || null,
+        ...assessmentFields,
       }
   const newContent = JSON.stringify(payload, null, 2)
   request({
@@ -2417,6 +2502,97 @@ const goToAdmin = () => {
 }
 
 /* 9.6 结构化输出样式 */
+.assessment-panel {
+  margin-bottom: 14px;
+  padding: 14px;
+  background: #f8fbff;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+}
+
+.assessment-panel.blocked {
+  background: #fff8eb;
+  border-color: #fed7aa;
+}
+
+.assessment-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.assessment-title {
+  color: #172541;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.assessment-status,
+.assessment-tag,
+.fact-chip,
+.rule-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.assessment-status {
+  padding: 5px 8px;
+  background: #e8f2ff;
+  color: #1677ff;
+  font-weight: 700;
+}
+
+.assessment-status.scene-unrelated,
+.assessment-status.scene-non_business,
+.assessment-status.scene-irrelevant {
+  background: #fff1f0;
+  color: #d93025;
+}
+
+.assessment-tags,
+.fact-row,
+.rule-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assessment-tag {
+  padding: 5px 8px;
+  background: #eef2f7;
+  color: #52627b;
+}
+
+.assessment-reason,
+.assessment-block {
+  display: block;
+  margin-top: 10px;
+  color: #52627b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.assessment-block {
+  color: #b45309;
+}
+
+.fact-chip {
+  padding: 6px 8px;
+  background: #fff;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+.rule-chip {
+  padding: 6px 8px;
+  background: #eefbf4;
+  color: #17835b;
+}
 .structured-result {
   background: #ffffff;
   padding: 0;
