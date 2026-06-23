@@ -37,3 +37,12 @@ project/*.png
 # 私钥与证书密钥
 *.pem
 *.key
+# 法规条文抽取中间材料和本地备份，不作为正式数据资产提交
+%SystemDrive%/
+project/database/backups/
+project/database/work_*/
+project/database/replacement_source_probe/
+project/database/tools/
+project/database/legal_clause_*_verified.csv
+project/database/legal_clause_pdf_candidate.csv
+project/database/legal_clause_replacement_needed.md

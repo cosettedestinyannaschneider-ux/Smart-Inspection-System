@@ -215,23 +215,39 @@ mysql --default-character-set=utf8mb4 -u root -p ai_project -e "source E:/Univer
 - 演示数据是可选的。
 - 正式开发或正式部署不建议依赖大量人工填充的测试数据。
 - 启动后端时，`schemaInit` 还会自动做一次兼容迁移检查，适合旧库升级场景。
+### 5.4 可选：导入法规条文演示种子与正式 CSV
 
-### 5.4 可选：导入法规条文演示种子
-
-仓库提供了 CSV 导入模板和少量公开法规条文演示种子：
+仓库提供了 CSV 导入模板、少量公开法规条文演示种子，以及第一批正式法规标准条文数据资产：
 
 - [database/legal_clause_import_template.csv](./database/legal_clause_import_template.csv)
 - [database/legal_clause_seed.csv](./database/legal_clause_seed.csv)
+- [database/legal_clause_official.csv](./database/legal_clause_official.csv)
+- [database/legal_clause_source_manifest.csv](./database/legal_clause_source_manifest.csv)
+- [database/legal_clause_coverage_report.md](./database/legal_clause_coverage_report.md)
+- [database/legal_clause_problem_log.csv](./database/legal_clause_problem_log.csv)
+- [database/legal_clause_import_resume.md](./database/legal_clause_import_resume.md)
 
-导入前请确认 `.env` 中数据库连接可用，并已执行基础表结构初始化。命令：
+正式 CSV 导入前可以先做不连接数据库的质量校验：
 
 ```powershell
-npm --prefix E:\University\Project\project1.0\project\backend run import:legal-clauses
+npm --prefix project/backend run validate:legal-clauses
+```
+
+导入前请确认 `.env` 中数据库连接可用，并已执行基础表结构初始化。导入正式 CSV：
+
+```powershell
+npm --prefix project/backend run import:legal-clauses -- project/database/legal_clause_official.csv
+```
+
+如只需要导入少量演示种子，可继续执行默认命令：
+
+```powershell
+npm --prefix project/backend run import:legal-clauses
 ```
 
 也可以在管理员知识库页面点击“导入条文CSV”，上传按模板整理好的 CSV 文件。
 
-说明：演示种子只用于让知识库具备最小法规依据，不等于完整法规库。正式使用时应继续从官方公开来源整理、校验并导入条文。
+说明：`legal_clause_official.csv` 是当前项目的第一批正式法规标准条文底座，来源清单和问题记录已随仓库保存；原始 PDF、Word、图片和抽取中间目录不进入 Git。正式使用时仍应继续从官方公开来源整理、校验并追加条文。
 
 ## 6. 后端启动
 

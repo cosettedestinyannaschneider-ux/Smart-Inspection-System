@@ -1,5 +1,29 @@
 # 功能测试记录
 
+## PR16：正式法规标准 CSV 数据资产与导入门禁（2026-06-23）
+
+### 变更范围
+
+- 纳入第一批正式法规标准条文数据资产 `project/database/legal_clause_official.csv`，共 1666 条。
+- 纳入来源清单、覆盖率报告、问题记录和导入续跑摘要，保留官方来源、正式编号、SHA256 和复核状态。
+- 新增 `validate:legal-clauses` 命令，对正式 CSV 做不连接数据库的质量校验。
+- `import:legal-clauses` 导入前自动执行同一套质量门禁；CSV 内重复、非法分类、本地伪来源或必填字段缺失会阻断导入。
+- `.gitignore` 明确排除法规抽取中间目录、本地备份、原始素材和临时 CSV。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 正式 CSV 质量校验 | `npm --prefix project/backend run validate:legal-clauses` 通过：1666 行、0 个 error、45 个短条文 warning | 通过 |
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 56 files` | 通过 |
+| 后端自动化测试 | `npm --prefix project/backend test` 通过，21 个用例全部通过 | 通过 |
+
+### 风险说明
+
+- 本轮无 DDL 变更，不修改 `.env`，不要求重建数据库。
+- 正式 CSV 导入命令会连接本地数据库；质量校验命令不连接数据库，可用于 CI 和提交前检查。
+- 原始 PDF、Word、图片、抽取中间目录和本地绝对路径不进入 Git；来源清单中的本机路径已脱敏。
+- 45 个短条文 warning 不阻断导入，但后续建立规则库时应优先人工复核。
 ## PR15：法规知识库覆盖率看板（2026-06-19）
 
 ### 变更范围
@@ -856,6 +880,30 @@
 
 ### 功能测试记录
 
+## PR16：正式法规标准 CSV 数据资产与导入门禁（2026-06-23）
+
+### 变更范围
+
+- 纳入第一批正式法规标准条文数据资产 `project/database/legal_clause_official.csv`，共 1666 条。
+- 纳入来源清单、覆盖率报告、问题记录和导入续跑摘要，保留官方来源、正式编号、SHA256 和复核状态。
+- 新增 `validate:legal-clauses` 命令，对正式 CSV 做不连接数据库的质量校验。
+- `import:legal-clauses` 导入前自动执行同一套质量门禁；CSV 内重复、非法分类、本地伪来源或必填字段缺失会阻断导入。
+- `.gitignore` 明确排除法规抽取中间目录、本地备份、原始素材和临时 CSV。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 正式 CSV 质量校验 | `npm --prefix project/backend run validate:legal-clauses` 通过：1666 行、0 个 error、45 个短条文 warning | 通过 |
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 56 files` | 通过 |
+| 后端自动化测试 | `npm --prefix project/backend test` 通过，21 个用例全部通过 | 通过 |
+
+### 风险说明
+
+- 本轮无 DDL 变更，不修改 `.env`，不要求重建数据库。
+- 正式 CSV 导入命令会连接本地数据库；质量校验命令不连接数据库，可用于 CI 和提交前检查。
+- 原始 PDF、Word、图片、抽取中间目录和本地绝对路径不进入 Git；来源清单中的本机路径已脱敏。
+- 45 个短条文 warning 不阻断导入，但后续建立规则库时应优先人工复核。
 | 用例 | 预期结果 | 实际结果 | 状态 |
 |---|---|---|---|
 | 未配置 `MYSQLDUMP_BIN` 时加载备份页 | 页面显示手动备份不可用，并说明缺少配置 | 后端语法检查通过，待本地运行验证 | 待验证 |
