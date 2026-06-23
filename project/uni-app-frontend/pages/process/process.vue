@@ -194,6 +194,8 @@
                     </view>
                     <view class="struct-actions">
                       <button class="mini-btn edit-btn" @click="startEditResult(msg)">编辑修改</button>
+                      <button v-if="canConfirmReport(msg)" class="mini-btn save-btn" :disabled="reviewingResult" @click="confirmReport(msg)">确认生成报告</button>
+                      <button v-if="canRejectReport(msg)" class="mini-btn struct-cancel-btn" :disabled="reviewingResult" @click="rejectReport(msg)">退回复核</button>
                     </view>
                   </view>
                   <view v-else class="struct-edit-form">
@@ -564,6 +566,7 @@ const showHazardDeleteConfirm = ref(false)
 const hazardDeleting = ref(false)
 const pendingHazardDelete = ref(null)
 const savingResult = ref(false)
+const reviewingResult = ref(false)
 const selectedHazardIds = ref([])
 const currentRequestTask = ref(null)
 const modelList = ref([])
@@ -667,6 +670,7 @@ const attachAssessmentFields = (target, data) => ({
   review_required: !!data.review_required,
   report_allowed: data.report_allowed,
   report_block_reason: data.report_block_reason || '',
+  review_status: data.review_status || '',
 })
 
 /** 场景状态展示文案 */
@@ -751,8 +755,70 @@ const buildAssessmentFieldsForSave = (data = {}) => ({
   review_required: !!data.review_required,
   report_allowed: data.report_allowed,
   report_block_reason: data.report_block_reason || '',
+  review_status: data.review_status || '',
 })
 
+const canConfirmReport = (msg) => {
+  if (!msg?.id || msg.wordPath || msg.pdfPath) return false
+  if (msg.reportAllowed === false || msg.report_allowed === false) return false
+  return ['pending', 'needs_review', ''].includes(String(msg.reviewStatus || msg.review_status || ''))
+}
+
+const canRejectReport = (msg) => !!msg?.id && !['needs_review', 'rejected'].includes(String(msg.reviewStatus || msg.review_status || ''))
+
+const applyReviewResponse = (msg, data = {}) => {
+  msg.reviewStatus = data.review_status || msg.reviewStatus
+  msg.review_required = data.review_required
+  msg.reviewRequired = data.review_required
+  msg.reportAllowed = data.report_allowed ?? msg.reportAllowed
+  msg.report_allowed = data.report_allowed ?? msg.report_allowed
+  msg.reportBlockReason = data.report_block_reason || msg.reportBlockReason
+  msg.report_block_reason = data.report_block_reason || msg.report_block_reason
+  msg.wordPath = data.wordPath || null
+  msg.pdfPath = data.pdfPath || null
+}
+
+const confirmReport = (msg) => {
+  if (!msg.id || reviewingResult.value) return
+  reviewingResult.value = true
+  request({
+    url: apiUrl('/api/history/review/confirm'),
+    method: 'POST',
+    data: { id: msg.id },
+  }).then((res) => {
+    if (res.data?.success) {
+      applyReviewResponse(msg, res.data)
+      uni.showToast({ title: '正式报告已生成', icon: 'success' })
+    } else {
+      uni.showToast({ title: res.data?.message || '确认失败', icon: 'none' })
+    }
+  }).catch(() => {
+    uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+  }).finally(() => {
+    reviewingResult.value = false
+  })
+}
+
+const rejectReport = (msg) => {
+  if (!msg.id || reviewingResult.value) return
+  reviewingResult.value = true
+  request({
+    url: apiUrl('/api/history/review/reject'),
+    method: 'POST',
+    data: { id: msg.id, comment: '前端人工退回复核' },
+  }).then((res) => {
+    if (res.data?.success) {
+      applyReviewResponse(msg, res.data)
+      uni.showToast({ title: '已退回复核', icon: 'success' })
+    } else {
+      uni.showToast({ title: res.data?.message || '退回失败', icon: 'none' })
+    }
+  }).catch(() => {
+    uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+  }).finally(() => {
+    reviewingResult.value = false
+  })
+}
 // 开始编辑结果
 const startEditResult = (msg) => {
   const data = parseStructuredData(msg.content)
@@ -802,8 +868,9 @@ const saveEditResult = (msg) => {
         msg.content = newContent
         msg.isEditing = false
         msg.editData = null
-        if (res.data.wordPath) msg.wordPath = res.data.wordPath
-        if (res.data.pdfPath) msg.pdfPath = res.data.pdfPath
+        applyReviewResponse(msg, res.data)
+        msg.wordPath = null
+        msg.pdfPath = null
         uni.showToast({ title: '保存成功', icon: 'success' })
       } else {
         uni.showToast({ title: res.data.message || '保存失败', icon: 'none' })
@@ -1097,6 +1164,10 @@ const loadSession = (sessionId) => {
             wordPath: item.wordPath || item.word_path,
             pdfPath: item.pdfPath || item.pdf_path,
             knowledgeRefs: normalizeKnowledgeRefs(item.knowledge_refs),
+            reviewStatus: item.review_status,
+            review_required: item.review_required,
+            reportAllowed: item.report_allowed,
+            reportBlockReason: item.report_block_reason,
             isEditing: false,
             editData: null
           }
@@ -1251,6 +1322,10 @@ const handleResponse = (data) => {
       wordPath: data.wordPath,
       pdfPath: data.pdfPath,
       knowledgeRefs: normalizeKnowledgeRefs(data.knowledge_refs),
+      reviewStatus: data.review_status,
+      review_required: data.review_required,
+      reportAllowed: data.report_allowed,
+      reportBlockReason: data.report_block_reason,
       isEditing: false,
       editData: null
     }

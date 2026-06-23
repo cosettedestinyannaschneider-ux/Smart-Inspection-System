@@ -192,6 +192,29 @@ const extractReferenceStandards = (...sources) => {
   return dedupe(split).slice(0, 6)
 }
 
+const normalizeArrayText = (value) => (Array.isArray(value)
+  ? value.map((item) => normalizeText(item)).filter(Boolean)
+  : [])
+
+const normalizeRuleRefs = (rules = []) => (Array.isArray(rules) ? rules : [])
+  .map((rule) => ({
+    id: rule.id || rule.rule_id || null,
+    name: normalizeText(rule.name || rule.rule_name),
+    hazard_level: normalizeText(rule.hazard_level),
+    evidence_sufficiency: normalizeText(rule.evidence_sufficiency),
+    judgment_reason: normalizeText(rule.judgment_reason || rule.reason),
+  }))
+  .filter((rule) => rule.name)
+
+const normalizeLegalRefs = (refs = []) => (Array.isArray(refs) ? refs : [])
+  .map((ref) => ({
+    name: normalizeText(ref.source_title || ref.name),
+    code: normalizeText(ref.source_code || ref.code),
+    clause: normalizeText(ref.clause_no || ref.clause),
+    content: normalizeText(ref.content),
+  }))
+  .filter((ref) => ref.name || ref.content)
+
 const normalizeItem = (item, index, enterprise) => ({
   image_id: Number(item.image_id) || index + 1,
   hazard_description: normalizeText(item.hazard_description || item.description || item.issue),
@@ -201,8 +224,54 @@ const normalizeItem = (item, index, enterprise) => ({
   responsibility: normalizeText(item.responsibility || item.owner) || DEFAULT_RESPONSIBILITY,
   enterprise_name: normalizeText(item.enterprise_name || enterprise.name),
   location: normalizeText(item.location || enterprise.project_name || enterprise.region || enterprise.address),
+  visible_facts: normalizeArrayText(item.visible_facts),
+  uncertain_points: normalizeArrayText(item.uncertain_points),
+  matched_rules: normalizeRuleRefs(item.matched_rules),
+  legal_refs: normalizeLegalRefs(item.legal_refs),
+  evidence_sufficiency: normalizeText(item.evidence_sufficiency),
+  review_required: item.review_required === true,
 })
 
+
+const evidenceLabel = (value) => ({
+  sufficient: '证据充分',
+  partial: '证据部分充分',
+  insufficient: '证据不足',
+  not_applicable: '不适用',
+}[String(value || '')] || '待人工核验')
+
+const reviewLabel = (value) => (value ? '需人工确认' : '已进入人工确认流程')
+
+const formatRulesSummary = (rules = []) => normalizeRuleRefs(rules)
+  .map((rule, index) => `${index + 1}. ${rule.name}${rule.hazard_level ? `（${rule.hazard_level}）` : ''}`)
+  .join('；')
+
+const formatLegalRefsSummary = (refs = []) => normalizeLegalRefs(refs)
+  .map((ref, index) => `${index + 1}. ${normalizeReferenceValue({ name: ref.name, code: ref.code, clause: ref.clause, content: ref.content })}`)
+  .join('')
+
+const enrichItemForReport = (item) => {
+  const facts = normalizeArrayText(item.visible_facts)
+  const uncertain = normalizeArrayText(item.uncertain_points)
+  const rules = normalizeRuleRefs(item.matched_rules)
+  const legalRefs = normalizeLegalRefs(item.legal_refs)
+  const detailLines = []
+  if (facts.length) detailLines.push(`可见事实：${facts.join('；')}`)
+  if (rules.length) detailLines.push(`命中规则：${formatRulesSummary(rules)}`)
+  if (item.evidence_sufficiency) detailLines.push(`证据充分性：${evidenceLabel(item.evidence_sufficiency)}`)
+  if (uncertain.length) detailLines.push(`需补充资料：${uncertain.join('；')}`)
+  if (legalRefs.length) detailLines.push(`法规条文依据：${formatLegalRefsSummary(legalRefs)}`)
+
+  return {
+    ...item,
+    hazard_description: detailLines.length
+      ? `${item.hazard_description || '现场隐患待复核'}\n${detailLines.join('\n')}`
+      : item.hazard_description,
+    suggestion: item.review_required
+      ? `${item.suggestion || '建议结合现场情况补充具体整改措施。'}\n复核要求：该项为 AI 初判结果，需由安全管理人员确认后作为正式结论。`
+      : item.suggestion,
+  }
+}
 const parseImprovementDirections = (text) => {
   const lines = stripMarkdown(text)
     .split(/\n+/)
@@ -257,6 +326,7 @@ const parseResult = (resultText, enterprise) => {
       comprehensiveOpinion: null,
       rawText: '',
       isStructured: false,
+      assessment: null,
     }
   }
 
@@ -298,6 +368,19 @@ const parseResult = (resultText, enterprise) => {
           .filter(Boolean)
       ),
       comprehensiveOpinion: opinion,
+      assessment: {
+        scene_status: normalizeText(data.scene_status),
+        scene_reason: normalizeText(data.scene_reason),
+        hazard_level: normalizeText(data.hazard_level),
+        evidence_sufficiency: normalizeText(data.evidence_sufficiency),
+        review_required: data.review_required === true,
+        report_allowed: data.report_allowed !== false,
+        report_block_reason: normalizeText(data.report_block_reason),
+        visible_facts: normalizeArrayText(data.visible_facts),
+        uncertain_points: normalizeArrayText(data.uncertain_points),
+        matched_rules: normalizeRuleRefs(data.matched_rules),
+        legal_refs: normalizeLegalRefs(data.legal_refs),
+      },
       rawText: '',
       isStructured: items.length > 0,
     }
@@ -337,6 +420,7 @@ const parseResult = (resultText, enterprise) => {
       comprehensiveOpinion: opinion,
       rawText: stripMarkdown(normalized),
       isStructured: items.length > 0,
+      assessment: null,
     }
   }
 }
@@ -369,9 +453,11 @@ const buildReportData = ({ prompt, result, imagePaths = [], enterprise }) => {
         responsibility: DEFAULT_RESPONSIBILITY,
       }, 0, normalizedEnterprise)]
 
+  const enrichedItems = items.map(enrichItemForReport)
+
   const finalStandards = mergeReferenceStandards(
     parsed.referenceStandards,
-    items.map((item) => item.basis)
+    enrichedItems.flatMap((item) => [item.basis, ...normalizeLegalRefs(item.legal_refs).map((ref) => normalizeReferenceValue({ name: ref.name, code: ref.code, clause: ref.clause, content: ref.content }))])
   )
 
   const opinion = (
@@ -390,10 +476,11 @@ const buildReportData = ({ prompt, result, imagePaths = [], enterprise }) => {
   return {
     prompt: normalizeText(prompt) || '无',
     enterprise: normalizedEnterprise,
-    items,
+    items: enrichedItems,
     referenceStandards: finalStandards,
     comprehensiveOpinion: opinion,
     rawText: parsed.isStructured ? '' : parsed.rawText,
+    assessment: parsed.assessment || null,
     imagePaths: toImageList(imagePaths),
   }
 }
