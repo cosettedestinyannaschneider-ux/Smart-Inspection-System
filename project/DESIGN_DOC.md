@@ -59,7 +59,7 @@
 
 ### 3.3 数据层（MySQL + 本地文件）
 
-- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/inspection_report_knowledge_refs/knowledge_categories/knowledge/knowledge_category_relations/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge` 保存法规文档及官方来源元数据，`knowledge_category_relations` 支持一份通用法规适用于多个行业分类，`knowledge_clauses` 用于保存自动抽取的法规条款和来源快照，`inspection_report_knowledge_refs` 用于保存报告生成时命中的依据快照。
+- **MySQL**：`ai_project` 库，核心业务表覆盖 enterprises/departments/users/user_permissions/auth_sessions/hazard_images/sessions/inspection_reports/inspection_report_images/inspection_report_knowledge_refs/knowledge_categories/knowledge/knowledge_category_relations/knowledge_clauses/action_logs/ai_model_configs/report_templates/backup_records 等模块；`knowledge` 保存法规文档及官方来源元数据，`knowledge_category_relations` 支持一份通用法规适用于多个行业分类，`knowledge_clause_drafts` 保存 PDF/DOCX 自动抽取后的待审核草稿，`knowledge_clauses` 保存 CSV 导入或审核通过后的正式法规条款和来源快照，`inspection_report_knowledge_refs` 用于保存报告生成时命中的依据快照。
 - **文件存储**：本地 `uploads/` 目录，区分 `uploads/hazard/`（隐患图片）、`uploads/reports/word/`、`uploads/reports/pdf/`、`uploads/report-templates/`；隐患图片、报告文件和报告模板均通过受控文件接口访问，不再依赖公开静态路径直链。
 
 ## 4. 双角色架构
@@ -206,10 +206,10 @@ pages/
 来源追溯原则：
 
 - `knowledge.category_id` 为主分类，`knowledge_category_relations` 为适用分类。
-- 官方来源字段从 `knowledge` 同步到自动抽取的 `knowledge_clauses`，便于后续报告引用时保留快照。
-- CSV 导入会自动创建或复用法规文档记录，并追加条款；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”跳过。
+- 官方来源字段从 `knowledge` 同步到抽取草稿和审核通过后的正式 `knowledge_clauses`，便于后续报告引用时保留快照。
+- CSV 导入会自动创建或复用法规文档记录，并追加正式条款；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”跳过。
 - 演示种子数据只覆盖少量高频场景，完整法规库需要管理员持续维护导入。
-- `verification_status = pending` 的条文可以用于管理员整理和测试检索，但后续严格判断阶段不得直接作为正式法规结论。
+- `verification_status = pending` 的正式条文可以用于管理员整理和测试检索，但后续严格判断阶段不得直接作为正式法规结论；PDF/DOCX 草稿在审核通过前不参与正式覆盖率和 AI 法规判断。
 - 历史分类“安全生产隐患排查报告”不再作为法规分类返回；旧数据不删除，仅保留兼容。
 
 覆盖率展示原则：

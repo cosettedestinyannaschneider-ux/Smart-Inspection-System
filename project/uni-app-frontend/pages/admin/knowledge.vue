@@ -7,7 +7,7 @@
       </view>
       <view class="page-action-row">
         <view class="secondary-btn" @click="openCategoryModal">分类管理</view>
-        <view class="secondary-btn" @click="pickClauseCsv">导入条文CSV</view>
+        <view class="secondary-btn" @click="openDraftModal()">抽取草稿</view>`r`n        <view class="secondary-btn" @click="pickClauseCsv">导入条文CSV</view>
         <view class="primary-btn" @click="openAdd">上传文档</view>
       </view>
     </view>
@@ -137,12 +137,12 @@
             <text class="parse-tag" :class="parseStatusClass(item.parse_status)">
               {{ parseStatusText(item.parse_status) }}
             </text>
-            <text class="clause-count">{{ Number(item.clause_count || 0) }} 条款</text>
+            <text class="clause-count">{{ Number(item.clause_count || 0) }} 正式条款</text>`r`n            <text v-if="item.pending_draft_count" class="draft-count" @click="openDraftModal(item)">{{ item.pending_draft_count }} 待审草稿</text>
           </view>
           <text v-if="item.parse_message" class="parse-message">{{ item.parse_message }}</text>
         </view>
         <view class="card-actions">
-          <text class="action-link" @click="openEdit(item)">编辑</text>
+          <text class="action-link" @click="openDraftModal(item)">草稿</text>`r`n          <text class="action-link" @click="openEdit(item)">编辑</text>
           <text class="action-link dangerous" @click="deleteKnowledge(item)">归档</text>
         </view>
       </view>
@@ -253,6 +253,59 @@
       </view>
     </view>
 
+    <view v-if="showDraftModal" class="modal-mask" @click="closeDraftModal">
+      <view class="modal-panel draft-modal" @click.stop="">
+        <view class="modal-header">
+          <view>
+            <text class="modal-title">抽取草稿审核</text>
+            <text class="modal-description">PDF/DOCX 自动抽取结果只进入草稿池，通过后才写入正式法规条文库。</text>
+          </view>
+          <text class="modal-close" @click="closeDraftModal">×</text>
+        </view>
+        <view class="draft-toolbar">
+          <picker :range="draftKnowledgeOptions" range-key="name" @change="changeDraftKnowledge">
+            <view class="form-picker">{{ currentDraftKnowledgeName }} ▾</view>
+          </picker>
+          <picker :range="draftStatusOptions" range-key="name" @change="changeDraftStatus">
+            <view class="form-picker">{{ currentDraftStatusName }} ▾</view>
+          </picker>
+          <view class="secondary-btn" @click="fetchDrafts">刷新</view>
+        </view>
+        <scroll-view scroll-y class="modal-body draft-body">
+          <view v-if="drafts.length" class="draft-list">
+            <view v-for="draft in drafts" :key="draft.id" class="draft-card">
+              <view class="draft-card-head">
+                <view>
+                  <text class="draft-title">{{ draft.clause_no || '未识别条款号' }}</text>
+                  <text class="draft-source">{{ draft.knowledge_title || draft.source_title }}</text>
+                </view>
+                <text class="draft-status" :class="draftStatusClass(draft.review_status)">{{ draftStatusText(draft.review_status) }}</text>
+              </view>
+              <textarea
+                v-model="draft.content"
+                class="draft-textarea"
+                maxlength="4000"
+                :disabled="draft.review_status !== 'pending'"
+              />
+              <view class="draft-meta-row">
+                <input v-model="draft.clause_no" class="draft-input" maxlength="100" placeholder="条款号" :disabled="draft.review_status !== 'pending'" />
+                <input v-model="draft.keywords" class="draft-input" maxlength="500" placeholder="关键词" :disabled="draft.review_status !== 'pending'" />
+              </view>
+              <input v-model="draft.review_note" class="draft-note" maxlength="500" placeholder="审核备注" :disabled="draft.review_status !== 'pending'" />
+              <view class="draft-actions" v-if="draft.review_status === 'pending'">
+                <view class="secondary-btn" @click="saveDraft(draft)">保存草稿</view>
+                <view class="save-btn" @click="approveDraft(draft)">通过入库</view>
+                <view class="danger-btn" @click="rejectDraft(draft)">驳回</view>
+              </view>
+            </view>
+          </view>
+          <view v-else class="empty-card small-empty">
+            <text class="empty-title">暂无抽取草稿</text>
+            <text class="empty-description">上传 PDF/DOCX 后会生成待审核草稿；DOC 旧格式只保留文件级管理。</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
     <view v-if="showCategoryModal" class="modal-mask" @click="closeCategoryModal">
       <view class="modal-panel" @click.stop="">
         <view class="modal-header">
@@ -307,8 +360,11 @@ const selectedIds = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const categorySubmitting = ref(false)
+const drafts = ref([])
+const draftFilter = ref({ knowledge_id: 'all', review_status: 'pending' })
 const showKnowledgeModal = ref(false)
 const showCategoryModal = ref(false)
+const showDraftModal = ref(false)
 const isEdit = ref(false)
 
 const documentTypeOptions = ['法律', '行政法规', '部门规章', '规范性文件', '国家标准', '行业标准', '地方标准', '团体标准', '其他']
@@ -706,6 +762,110 @@ const pickFile = () => {
   // #endif
 }
 
+const normalizeDraft = (item = {}) => ({
+  ...item,
+  id: Number(item.id),
+  knowledge_id: Number(item.knowledge_id || 0),
+  category_id: item.category_id ? Number(item.category_id) : null,
+  clause_no: String(item.clause_no || '').trim(),
+  content: String(item.content || ''),
+  keywords: String(item.keywords || '').trim(),
+  review_status: String(item.review_status || 'pending'),
+  review_note: String(item.review_note || '').trim(),
+})
+
+const draftStatusText = (status) => {
+  const map = { pending: '待审核', approved: '已通过', rejected: '已驳回' }
+  return map[String(status || 'pending')] || '待审核'
+}
+
+const draftStatusClass = (status) => `draft-${String(status || 'pending')}`
+
+const openDraftModal = async (item = null) => {
+  draftFilter.value = {
+    knowledge_id: item?.id ? String(item.id) : 'all',
+    review_status: 'pending',
+  }
+  showDraftModal.value = true
+  await fetchDrafts()
+}
+
+const closeDraftModal = () => {
+  showDraftModal.value = false
+  drafts.value = []
+}
+
+const changeDraftKnowledge = async (event) => {
+  const option = draftKnowledgeOptions.value[event.detail.value]
+  draftFilter.value.knowledge_id = option ? String(option.id) : 'all'
+  await fetchDrafts()
+}
+
+const changeDraftStatus = async (event) => {
+  const option = draftStatusOptions[event.detail.value]
+  draftFilter.value.review_status = option ? option.key : 'pending'
+  await fetchDrafts()
+}
+
+const fetchDrafts = async () => {
+  try {
+    const payload = {}
+    if (draftFilter.value.knowledge_id !== 'all') payload.knowledge_id = Number(draftFilter.value.knowledge_id)
+    if (draftFilter.value.review_status !== 'all') payload.review_status = draftFilter.value.review_status
+    const result = await postAdmin('/api/admin/knowledge/drafts/list', payload)
+    drafts.value = Array.isArray(result.data) ? result.data.map(normalizeDraft) : []
+  } catch (error) {
+    drafts.value = []
+    showMessage(error?.message || '草稿加载失败')
+  }
+}
+
+const saveDraft = async (draft) => {
+  try {
+    const result = await postAdmin('/api/admin/knowledge/drafts/update', {
+      id: draft.id,
+      category_id: draft.category_id,
+      clause_no: draft.clause_no,
+      content: draft.content,
+      keywords: draft.keywords,
+      review_note: draft.review_note,
+    })
+    Object.assign(draft, normalizeDraft(result.data || result))
+    showMessage('草稿已保存', 'success')
+  } catch (error) {
+    showMessage(error?.message || '草稿保存失败')
+  }
+}
+
+const approveDraft = async (draft) => {
+  try {
+    await saveDraft(draft)
+    const result = await postAdmin('/api/admin/knowledge/drafts/approve', {
+      id: draft.id,
+      review_note: draft.review_note,
+    })
+    Object.assign(draft, normalizeDraft(result.data || result))
+    showMessage('已写入正式条文', 'success')
+    await fetchKnowledge()
+    await fetchCoverage()
+  } catch (error) {
+    showMessage(error?.message || '草稿通过失败')
+  }
+}
+
+const rejectDraft = async (draft) => {
+  try {
+    const result = await postAdmin('/api/admin/knowledge/drafts/reject', {
+      id: draft.id,
+      review_note: draft.review_note,
+    })
+    Object.assign(draft, normalizeDraft(result.data || result))
+    showMessage('草稿已驳回', 'success')
+    await fetchKnowledge()
+  } catch (error) {
+    showMessage(error?.message || '草稿驳回失败')
+  }
+}
 const pickClauseCsv = () => {
   // #ifdef H5
   const input = document.createElement('input')
@@ -1035,7 +1195,8 @@ const deleteCategory = (category) => {
 .secondary-btn,
 .save-btn,
 .mini-save-btn,
-.batch-button {
+.batch-button,
+.danger-btn {
   height: 40px;
   padding: 0 16px;
   display: flex;

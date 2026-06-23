@@ -1,5 +1,29 @@
 # 功能测试记录
 
+## PR17：知识文档抽取草稿审核（2026-06-23）
+
+### 变更范围
+
+- 新增 `knowledge_clause_drafts` 表，PDF/DOCX 自动抽取结果先进入草稿池。
+- 知识文档上传/替换文件后不再直接覆盖正式 `knowledge_clauses`。
+- 新增管理员草稿列表、编辑、通过、驳回接口；通过后才写入正式条文并标记 `verified`。
+- 管理端知识库页面新增“抽取草稿”入口，可按文档和状态筛选、编辑、通过或驳回草稿。
+- CSV 导入仍作为正式条文入库通道，不受草稿流程影响。
+
+### 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 58 files` | 通过 |
+| 后端自动化测试 | `npm --prefix project/backend test` 通过，25 个用例全部通过 | 通过 |
+| 前端 H5 构建 | `npm --prefix project/uni-app-frontend run build:h5` 通过，输出 `DONE Build complete` | 通过 |
+
+### 风险说明
+
+- 本轮涉及 DDL，已同步更新 `project/database/schema.sql` 和 `schemaInit`。
+- 上传 PDF/DOCX 后正式覆盖率不会立即增加，这是预期行为；需管理员审核通过草稿后才进入正式条文库。
+- 当前不实现 OCR；扫描件、图片型 PDF 或复杂表格仍需人工整理后通过 CSV 导入或后续补充审核。
+- 本轮不修改 `.env`，不涉及真实数据库密码、AI API Key 或证书。
 ## PR16：正式法规标准 CSV 数据资产与导入门禁（2026-06-23）
 
 ### 变更范围
