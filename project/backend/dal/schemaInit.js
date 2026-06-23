@@ -30,6 +30,7 @@ const schemaInit = {
     await this.step09_knowledge()
     await this.step09KnowledgeCategoryRelations()
     await this.step09KnowledgeClauses()
+    await this.step09KnowledgeClauseDrafts()
     await this.step09InspectionReportKnowledgeRefs()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
@@ -616,6 +617,69 @@ const schemaInit = {
       'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
   },
 
+  // =========================================================================
+  // Step 9.6: 知识库条款抽取草稿表（PDF/DOCX 抽取先审核再入正式库）
+  // =========================================================================
+  async step09KnowledgeClauseDrafts() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS knowledge_clause_drafts (
+        id            INT           NOT NULL AUTO_INCREMENT,
+        knowledge_id  INT           NOT NULL,
+        category_id   INT           DEFAULT NULL,
+        source_title  VARCHAR(300)  NOT NULL,
+        source_code   VARCHAR(100)  DEFAULT NULL,
+        source_url    VARCHAR(1000) DEFAULT NULL,
+        issuing_authority VARCHAR(200) DEFAULT NULL,
+        document_type VARCHAR(50) DEFAULT NULL,
+        publish_date  DATE DEFAULT NULL,
+        effective_date DATE DEFAULT NULL,
+        current_status VARCHAR(50) NOT NULL DEFAULT '现行有效',
+        clause_no     VARCHAR(100)  DEFAULT NULL,
+        content       TEXT          NOT NULL,
+        keywords      VARCHAR(500)  DEFAULT NULL,
+        extraction_method VARCHAR(30) NOT NULL DEFAULT 'auto',
+        confidence_level VARCHAR(20) NOT NULL DEFAULT 'medium',
+        review_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        review_note   VARCHAR(500) DEFAULT NULL,
+        reviewed_by   INT DEFAULT NULL,
+        reviewed_at   DATETIME DEFAULT NULL,
+        sort          INT           NOT NULL DEFAULT 0,
+        status        VARCHAR(20)   NOT NULL DEFAULT 'active',
+        created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_kcd_knowledge_id (knowledge_id),
+        KEY idx_kcd_category_id (category_id),
+        KEY idx_kcd_review_status (review_status),
+        KEY idx_kcd_status (status),
+        KEY idx_kcd_sort (sort)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    for (const colDef of [
+      "extraction_method VARCHAR(30) NOT NULL DEFAULT 'auto'",
+      "confidence_level VARCHAR(20) NOT NULL DEFAULT 'medium'",
+      "review_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
+      'review_note VARCHAR(500) DEFAULT NULL',
+      'reviewed_by INT DEFAULT NULL',
+      'reviewed_at DATETIME DEFAULT NULL',
+      "status VARCHAR(20) NOT NULL DEFAULT 'active'",
+    ]) {
+      await this._addColumn('knowledge_clause_drafts', colDef)
+    }
+
+    await this._addIndex('knowledge_clause_drafts', 'idx_kcd_knowledge_id', 'KEY idx_kcd_knowledge_id (knowledge_id)')
+    await this._addIndex('knowledge_clause_drafts', 'idx_kcd_category_id', 'KEY idx_kcd_category_id (category_id)')
+    await this._addIndex('knowledge_clause_drafts', 'idx_kcd_review_status', 'KEY idx_kcd_review_status (review_status)')
+    await this._addIndex('knowledge_clause_drafts', 'idx_kcd_status', 'KEY idx_kcd_status (status)')
+
+    await this._addFK('knowledge_clause_drafts', 'fk_kcd_knowledge',
+      'FOREIGN KEY (knowledge_id) REFERENCES knowledge (id) ON DELETE CASCADE ON UPDATE CASCADE')
+    await this._addFK('knowledge_clause_drafts', 'fk_kcd_category',
+      'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('knowledge_clause_drafts', 'fk_kcd_reviewer',
+      'FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE')
+  },
   // =========================================================================
   // Step 9.6: 报告-知识条款引用表（保存 AI 报告引用依据快照）
   // =========================================================================

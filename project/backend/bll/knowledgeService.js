@@ -4,6 +4,7 @@ const knowledgeDal = require('../dal/knowledgeDal')
 const knowledgeCategoryDal = require('../dal/knowledgeCategoryDal')
 const knowledgeCategoryRelationDal = require('../dal/knowledgeCategoryRelationDal')
 const knowledgeClauseDal = require('../dal/knowledgeClauseDal')
+const knowledgeClauseDraftDal = require('../dal/knowledgeClauseDraftDal')
 const knowledgeCoverageDal = require('../dal/knowledgeCoverageDal')
 const { extractClauses } = require('./knowledgeClauseExtractService')
 const C = require('../common/Constants')
@@ -13,6 +14,7 @@ const { isLegalKnowledgeCategoryName } = require('../common/legalKnowledgeTaxono
 const DOCUMENT_TYPES = new Set(['法律', '行政法规', '部门规章', '规范性文件', '国家标准', '行业标准', '地方标准', '团体标准', '其他'])
 const CURRENT_STATUSES = new Set(['现行有效', '已废止', '已修订', '征求意见', '未知'])
 const VERIFICATION_STATUSES = new Set(['pending', 'verified', 'rejected'])
+const DRAFT_REVIEW_STATUSES = new Set(['pending', 'approved', 'rejected'])
 
 /** 创建知识库业务异常，供路由层返回明确提示 */
 const knowledgeError = (message) => {
@@ -280,6 +282,10 @@ const toClientKnowledge = (record) => {
     clause_count: Number(record.clause_count || 0),
     parse_status: resolveParseStatus(record),
     parse_message: record.parse_message || '',
+    draft_count: Number(record.draft_count || 0),
+    pending_draft_count: Number(record.pending_draft_count || 0),
+    approved_draft_count: Number(record.approved_draft_count || 0),
+    rejected_draft_count: Number(record.rejected_draft_count || 0),
     status: record.status,
     created_at: record.created_at,
     updated_at: record.updated_at,
@@ -294,8 +300,8 @@ const resolveParseStatus = (record) => {
   return Number(record?.clause_count || 0) > 0 ? 'parsed' : 'pending'
 }
 
-/** 上传或替换文件后同步生成结构化条款；失败只记录状态，不阻断文件级管理 */
-const refreshClausesForKnowledge = async ({
+/** 上传或替换文件后生成抽取草稿；失败只记录状态，不阻断文件级管理 */
+const refreshClauseDraftsForKnowledge = async ({
   knowledgeId,
   categoryId,
   title,
@@ -308,7 +314,7 @@ const refreshClausesForKnowledge = async ({
     return {
       status: 'failed',
       reason: '知识库文件不存在，无法抽取条款',
-      clause_count: 0,
+      draft_count: 0,
     }
   }
 
@@ -330,18 +336,24 @@ const refreshClausesForKnowledge = async ({
       verificationStatus: provenance.verification_status,
     })
 
-    await knowledgeClauseDal.replaceByKnowledgeId(knowledgeId, extracted.clauses)
+    const drafts = extracted.clauses.map((clause) => ({
+      ...clause,
+      extraction_method: storedFile.fileType === 'pdf' ? 'pdf' : (storedFile.fileType === 'docx' ? 'docx' : 'auto'),
+      confidence_level: storedFile.fileType === 'docx' ? 'medium' : 'low',
+      review_status: 'pending',
+    }))
+    await knowledgeClauseDraftDal.replaceByKnowledgeId(knowledgeId, drafts)
     return {
       status: extracted.status,
       reason: extracted.reason || '',
-      clause_count: extracted.clauses.length,
+      draft_count: extracted.clauses.length,
     }
   } catch (error) {
-    await knowledgeClauseDal.replaceByKnowledgeId(knowledgeId, [])
+    await knowledgeClauseDraftDal.replaceByKnowledgeId(knowledgeId, [])
     return {
       status: 'failed',
       reason: error.message || '知识条款抽取失败',
-      clause_count: 0,
+      draft_count: 0,
     }
   }
 }
@@ -355,7 +367,9 @@ const knowledgeService = {
 
   /** 获取管理员知识库列表 */
   async listForAdmin() {
-    return await this.listForClient()
+    const list = await this.listForClient()
+    const draftCountMap = await knowledgeClauseDraftDal.countByKnowledgeIds(list.map((item) => item.id))
+    return list.map((item) => ({ ...item, ...(draftCountMap.get(Number(item.id)) || {}) }))
   },
 
   /** 获取法规知识库覆盖率统计，供管理员判断当前条文库是否足以支撑 AI 判断 */
@@ -487,7 +501,7 @@ const knowledgeService = {
       })
       await knowledgeCategoryRelationDal.replaceByKnowledgeId(createdId, applicableCategoryIds)
 
-      const parseResult = await refreshClausesForKnowledge({
+      const parseResult = await refreshClauseDraftsForKnowledge({
         knowledgeId: createdId,
         categoryId: normalized.categoryId,
         title: normalized.title,
@@ -546,7 +560,7 @@ const knowledgeService = {
 
       let parseResult = null
       if (storedFile) {
-        parseResult = await refreshClausesForKnowledge({
+        parseResult = await refreshClauseDraftsForKnowledge({
           knowledgeId: targetId,
           categoryId: normalized.categoryId,
           title: normalized.title,
@@ -560,6 +574,11 @@ const knowledgeService = {
         })
       } else {
         await knowledgeClauseDal.syncKnowledgeMetadata(targetId, {
+          categoryId: normalized.categoryId,
+          sourceTitle: normalized.title,
+          ...provenance,
+        })
+        await knowledgeClauseDraftDal.syncKnowledgeMetadata(targetId, {
           categoryId: normalized.categoryId,
           sourceTitle: normalized.title,
           ...provenance,
@@ -579,6 +598,101 @@ const knowledgeService = {
     }
   },
 
+  /** 查询抽取草稿列表 */
+  async listDrafts(payload = {}) {
+    const knowledgeId = payload.knowledge_id || payload.knowledgeId || null
+    if (knowledgeId) await this.getById(knowledgeId)
+    const reviewStatus = String(payload.review_status || payload.reviewStatus || '').trim()
+    if (reviewStatus && !DRAFT_REVIEW_STATUSES.has(reviewStatus)) throw knowledgeError('草稿审核状态无效')
+    return await knowledgeClauseDraftDal.findAll({
+      knowledge_id: knowledgeId ? normalizeKnowledgeId(knowledgeId) : null,
+      review_status: reviewStatus || null,
+    })
+  },
+
+  /** 更新抽取草稿内容，审核前允许管理员人工修正 */
+  async updateDraft(payload = {}) {
+    const draftId = Number(payload.id || 0)
+    if (!draftId) throw knowledgeError('缺少草稿 ID')
+    const existing = await knowledgeClauseDraftDal.findById(draftId)
+    if (!existing) throw knowledgeError('抽取草稿不存在')
+    if (existing.review_status !== 'pending') throw knowledgeError('已审核草稿不能再编辑')
+
+    const content = String(payload.content ?? existing.content ?? '').trim()
+    const clauseNo = String(payload.clause_no ?? payload.clauseNo ?? existing.clause_no ?? '').trim()
+    if (!content) throw knowledgeError('草稿条文内容不能为空')
+
+    await knowledgeClauseDraftDal.updateById(draftId, {
+      category_id: normalizeCategoryId(payload.category_id ?? payload.categoryId ?? existing.category_id),
+      clause_no: clauseNo || null,
+      content,
+      keywords: normalizeOptionalText(payload.keywords ?? existing.keywords, 500),
+      review_note: normalizeOptionalText(payload.review_note ?? payload.reviewNote ?? existing.review_note, 500),
+    })
+    return await knowledgeClauseDraftDal.findById(draftId)
+  },
+
+  /** 审核通过草稿，正式写入 knowledge_clauses 并标记 verified */
+  async approveDraft(payload = {}, reviewerId = null) {
+    const draftId = Number(payload.id || 0)
+    if (!draftId) throw knowledgeError('缺少草稿 ID')
+    const draft = await knowledgeClauseDraftDal.findById(draftId)
+    if (!draft) throw knowledgeError('抽取草稿不存在')
+    if (draft.review_status !== 'pending') throw knowledgeError('该草稿已审核')
+    if (!String(draft.content || '').trim()) throw knowledgeError('草稿条文内容不能为空')
+
+    const duplicate = await knowledgeClauseDal.findDuplicate({
+      source_title: draft.source_title,
+      source_code: draft.source_code,
+      clause_no: draft.clause_no,
+      content: draft.content,
+    })
+
+    if (!duplicate) {
+      await knowledgeClauseDal.create(draft.knowledge_id, {
+        category_id: draft.category_id,
+        source_title: draft.source_title,
+        source_code: draft.source_code,
+        source_url: draft.source_url,
+        issuing_authority: draft.issuing_authority,
+        document_type: draft.document_type,
+        publish_date: draft.publish_date,
+        effective_date: draft.effective_date,
+        current_status: draft.current_status,
+        verification_status: 'verified',
+        clause_no: draft.clause_no,
+        content: draft.content,
+        keywords: draft.keywords,
+        sort: draft.sort,
+        status: 'active',
+      })
+    }
+
+    await knowledgeClauseDraftDal.updateById(draftId, {
+      review_status: 'approved',
+      review_note: normalizeOptionalText(payload.review_note ?? payload.reviewNote, 500) || (duplicate ? '已存在相同正式条文，本次仅标记通过' : null),
+      reviewed_by: reviewerId || null,
+      reviewed_at: new Date(),
+    })
+    return await knowledgeClauseDraftDal.findById(draftId)
+  },
+
+  /** 驳回抽取草稿，不进入正式知识条文库 */
+  async rejectDraft(payload = {}, reviewerId = null) {
+    const draftId = Number(payload.id || 0)
+    if (!draftId) throw knowledgeError('缺少草稿 ID')
+    const draft = await knowledgeClauseDraftDal.findById(draftId)
+    if (!draft) throw knowledgeError('抽取草稿不存在')
+    if (draft.review_status !== 'pending') throw knowledgeError('该草稿已审核')
+
+    await knowledgeClauseDraftDal.updateById(draftId, {
+      review_status: 'rejected',
+      review_note: normalizeOptionalText(payload.review_note ?? payload.reviewNote, 500) || '管理员驳回',
+      reviewed_by: reviewerId || null,
+      reviewed_at: new Date(),
+    })
+    return await knowledgeClauseDraftDal.findById(draftId)
+  },
   /** 单条归档知识库文档 */
   async archive(id) {
     const targetId = normalizeKnowledgeId(id)
@@ -586,6 +700,7 @@ const knowledgeService = {
     await knowledgeDal.archiveById(targetId)
     await knowledgeCategoryRelationDal.deleteByKnowledgeId(targetId)
     await knowledgeClauseDal.archiveByKnowledgeId(targetId)
+    await knowledgeClauseDraftDal.archiveByKnowledgeId(targetId)
     return existing
   },
 
@@ -604,6 +719,7 @@ const knowledgeService = {
 
     await knowledgeDal.archiveMany(normalizedIds)
     await knowledgeClauseDal.archiveByKnowledgeIds(normalizedIds)
+    await knowledgeClauseDraftDal.archiveByKnowledgeIds(normalizedIds)
     return existingRecords.map(toClientKnowledge)
   },
 

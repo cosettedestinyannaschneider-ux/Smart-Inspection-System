@@ -331,6 +331,50 @@ CREATE TABLE knowledge_clauses (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识库条款表';
 
 -- ============================================================================
+-- 14. 知识库条款抽取草稿表（PDF/DOCX 抽取先审核再进入正式条文库）
+-- ============================================================================
+CREATE TABLE knowledge_clause_drafts (
+  id            INT           NOT NULL AUTO_INCREMENT,
+  knowledge_id  INT           NOT NULL COMMENT '来源知识文档',
+  category_id   INT           DEFAULT NULL COMMENT '分类快照',
+  source_title  VARCHAR(300)  NOT NULL COMMENT '来源文档标题快照',
+  source_code   VARCHAR(100)  DEFAULT NULL COMMENT '法规或标准编号快照',
+  source_url    VARCHAR(1000) DEFAULT NULL COMMENT '官方来源URL快照',
+  issuing_authority VARCHAR(200) DEFAULT NULL COMMENT '发布机关快照',
+  document_type VARCHAR(50) DEFAULT NULL COMMENT '文件类型快照',
+  publish_date  DATE DEFAULT NULL COMMENT '发布日期快照',
+  effective_date DATE DEFAULT NULL COMMENT '施行日期快照',
+  current_status VARCHAR(50) NOT NULL DEFAULT '现行有效' COMMENT '现行状态快照',
+  clause_no     VARCHAR(100)  DEFAULT NULL COMMENT '草稿条款号',
+  content       TEXT          NOT NULL COMMENT '草稿条文内容',
+  keywords      VARCHAR(500)  DEFAULT NULL COMMENT '关键词',
+  extraction_method VARCHAR(30) NOT NULL DEFAULT 'auto' COMMENT '抽取方式：pdf/docx/ocr/manual',
+  confidence_level VARCHAR(20) NOT NULL DEFAULT 'medium' COMMENT '抽取置信等级：high/medium/low',
+  review_status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '审核状态：pending/approved/rejected',
+  review_note   VARCHAR(500) DEFAULT NULL COMMENT '审核备注',
+  reviewed_by   INT DEFAULT NULL COMMENT '审核人',
+  reviewed_at   DATETIME DEFAULT NULL COMMENT '审核时间',
+  sort          INT           NOT NULL DEFAULT 0 COMMENT '草稿顺序',
+  status        ENUM('active','archived') NOT NULL DEFAULT 'active',
+  created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_kcd_knowledge_id (knowledge_id),
+  KEY idx_kcd_category_id (category_id),
+  KEY idx_kcd_review_status (review_status),
+  KEY idx_kcd_status (status),
+  KEY idx_kcd_sort (sort),
+  CONSTRAINT fk_kcd_knowledge
+    FOREIGN KEY (knowledge_id) REFERENCES knowledge (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_kcd_category
+    FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_kcd_reviewer
+    FOREIGN KEY (reviewed_by) REFERENCES users (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识库条款抽取草稿表';
+-- ============================================================================
 -- 14. 报告-知识条款引用表（报告依据可追溯）
 -- ============================================================================
 CREATE TABLE inspection_report_knowledge_refs (
