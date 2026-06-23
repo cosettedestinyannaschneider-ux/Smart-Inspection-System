@@ -11,6 +11,7 @@ const aiService = require('./bll/aiService')
 const docService = require('./bll/docService')
 const knowledgeService = require('./bll/knowledgeService')
 const legalClauseImportService = require('./bll/legalClauseImportService')
+const { hazardRuleService } = require('./bll/hazardRuleService')
 const modelConfigService = require('./bll/modelConfigService')
 const adminWorkbenchService = require('./bll/adminWorkbenchService')
 const reportTemplateService = require('./bll/reportTemplateService')
@@ -973,6 +974,131 @@ app.post('/api/admin/knowledge/batch-delete', adminAuth, async (req, res) => {
   }
 })
 
+app.post('/api/admin/knowledge/drafts/list', adminAuth, async (req, res) => {
+  try {
+    res.success(await knowledgeService.listDrafts(req.body || {}))
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/drafts/update', adminAuth, async (req, res) => {
+  try {
+    const updated = await knowledgeService.updateDraft(req.body || {})
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_KNOWLEDGE_DRAFT, {
+      id: Number(updated.id),
+      knowledge_id: Number(updated.knowledge_id || 0),
+    }, req.ip)
+    res.success(updated, '草稿已更新')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/drafts/approve', adminAuth, async (req, res) => {
+  try {
+    const approved = await knowledgeService.approveDraft(req.body || {}, getAuthUserId(req))
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_APPROVE_KNOWLEDGE_DRAFT, {
+      id: Number(approved.id),
+      knowledge_id: Number(approved.knowledge_id || 0),
+    }, req.ip)
+    res.success(approved, '草稿已通过并写入正式条文')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/drafts/reject', adminAuth, async (req, res) => {
+  try {
+    const rejected = await knowledgeService.rejectDraft(req.body || {}, getAuthUserId(req))
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_REJECT_KNOWLEDGE_DRAFT, {
+      id: Number(rejected.id),
+      knowledge_id: Number(rejected.knowledge_id || 0),
+    }, req.ip)
+    res.success(rejected, '草稿已驳回')
+  } catch (err) {
+    res.fail(resolveKnowledgeErrorCode(err), err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/list', adminAuth, async (req, res) => {
+  try {
+    res.success(await hazardRuleService.list(req.body || {}))
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/search-clauses', adminAuth, async (req, res) => {
+  try {
+    res.success(await hazardRuleService.searchClauses(req.body || {}))
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/create', adminAuth, async (req, res) => {
+  try {
+    const created = await hazardRuleService.create(req.body || {})
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ADD_HAZARD_RULE, {
+      id: Number(created.id),
+      name: created.name,
+      hazard_level: created.hazard_level,
+    }, req.ip)
+    res.success(created, '规则已新增')
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/update', adminAuth, async (req, res) => {
+  try {
+    const updated = await hazardRuleService.update(req.body || {})
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_UPDATE_HAZARD_RULE, {
+      id: Number(updated.id),
+      name: updated.name,
+      hazard_level: updated.hazard_level,
+    }, req.ip)
+    res.success(updated, '规则已更新')
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/toggle', adminAuth, async (req, res) => {
+  try {
+    const updated = await hazardRuleService.setActive(req.body || {})
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_TOGGLE_HAZARD_RULE, {
+      id: Number(updated.id),
+      is_active: !!updated.is_active,
+    }, req.ip)
+    res.success(updated, updated.is_active ? '规则已启用' : '规则已停用')
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/archive', adminAuth, async (req, res) => {
+  try {
+    const archived = await hazardRuleService.archive(req.body || {})
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_ARCHIVE_HAZARD_RULE, {
+      id: Number(archived.id),
+    }, req.ip)
+    res.success(archived, '规则已归档')
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
+
+app.post('/api/admin/knowledge/rules/import-seed', adminAuth, async (req, res) => {
+  try {
+    const summary = await hazardRuleService.importSeedPack()
+    await logDal.logAction(getAuthUserId(req), C.ACTION_ADMIN_IMPORT_HAZARD_RULE_SEED, summary, req.ip)
+    res.success(summary, '规则种子导入完成')
+  } catch (err) {
+    res.fail(err?.isHazardRuleError ? ErrorCode.PARAM_INVALID : ErrorCode.DATABASE_ERROR, err.message)
+  }
+})
 app.post('/api/admin/knowledge/clauses/import-csv', adminAuth, useLegalClauseCsvUpload('file'), async (req, res) => {
   try {
     if (!req.file?.path) return res.fail(ErrorCode.FILE_REQUIRED, '请上传法规条文 CSV 文件')

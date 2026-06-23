@@ -5,6 +5,7 @@
     { "path": "pages/workbench/workbench", "style": { "navigationBarTitleText": "工作台", "navigationStyle": "custom" } },
     { "path": "pages/admin/users", "style": { "navigationBarTitleText": "用户管理", "navigationStyle": "custom" } },
     { "path": "pages/admin/knowledge", "style": { "navigationBarTitleText": "知识库管理", "navigationStyle": "custom" } },
+    { "path": "pages/admin/rules", "style": { "navigationBarTitleText": "隐患规则库", "navigationStyle": "custom" } },
     { "path": "pages/admin/model-config", "style": { "navigationBarTitleText": "AI模型配置", "navigationStyle": "custom" } },
     { "path": "pages/admin/logs", "style": { "navigationBarTitleText": "操作日志", "navigationStyle": "custom" } },
     { "path": "pages/admin/enterprises", "style": { "navigationBarTitleText": "企业数据查询", "navigationStyle": "custom" } },

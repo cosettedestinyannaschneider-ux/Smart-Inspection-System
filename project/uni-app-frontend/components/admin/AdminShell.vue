@@ -70,6 +70,7 @@ const menuItems = [
   { key: 'home', label: '首页', symbol: '⌂' },
   { key: 'users', label: '用户管理', symbol: '♙' },
   { key: 'knowledge', label: '知识库管理', symbol: '▤' },
+  { key: 'rules', label: '隐患规则库', symbol: '▦' },
   { key: 'model-config', label: 'AI 模型配置', symbol: '◇' },
   { key: 'enterprises', label: '企业数据查询', symbol: '▥' },
   { key: 'logs', label: '操作日志', symbol: '≡' },

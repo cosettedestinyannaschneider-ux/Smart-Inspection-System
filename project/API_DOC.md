@@ -497,6 +497,13 @@ Authorization: Bearer <access_token>
 | `POST /api/admin/knowledge/categories/add` | `name`、`sort` | 仅允许固定 14 类法规分类名称 |
 | `POST /api/admin/knowledge/categories/update` | `id`、`name`、`sort` | 仅允许固定 14 类法规分类名称 |
 | `POST /api/admin/knowledge/categories/delete` | `id` | 删除无关联文档的分类；若仍有关联文档，后端明确拒绝 |
+| `POST /api/admin/knowledge/rules/list` | `keyword`、`category_id`、`hazard_level`、`status` 可选 | 查询隐患判定规则列表 |
+| `POST /api/admin/knowledge/rules/search-clauses` | `keyword`、`category_id`、`limit` 可选 | 搜索可关联的已校验正式条文 |
+| `POST /api/admin/knowledge/rules/create` | 规则字段、`clause_ids` | 新增隐患判定规则 |
+| `POST /api/admin/knowledge/rules/update` | `id`、规则字段、`clause_ids` | 编辑隐患判定规则 |
+| `POST /api/admin/knowledge/rules/toggle` | `id`、`is_active` | 启用或停用规则 |
+| `POST /api/admin/knowledge/rules/archive` | `id` | 归档规则，归档后不参与判定 |
+| `POST /api/admin/knowledge/rules/import-seed` | 无业务参数 | 按本地已校验条文导入高频隐患规则种子包 |
 
 知识库管理规则：
 
@@ -520,8 +527,17 @@ Authorization: Bearer <access_token>
 - 覆盖率接口的 `summary.knowledge_count` 和 `summary.clause_count` 为全库唯一计数；分类卡片按适用分类统计，同一份通用法规关联多个分类时会分别体现到各分类
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
-- 当前阶段已完成正式 CSV 条款入库、PDF/DOCX 草稿审核、正式 CSV 数据资产和知识库覆盖率看板；规则库数量和严格隐患判定由后续规则库 PR 接入
+- 当前阶段已完成正式 CSV 条款入库、PDF/DOCX 草稿审核、正式 CSV 数据资产、知识库覆盖率看板和隐患规则库维护；严格 AI 判定链路由后续规则驱动分析 PR 接入
 
+隐患规则库管理规则：
+
+- 规则库用于把正式法规条文转化为可执行的隐患判定规则；AI 后续只在启用规则内做受控匹配。
+- `hazard_level` 当前取值：`未发现明显隐患`、`一般隐患`、`疑似重大隐患`、`重大隐患`、`需人工复核`。
+- `insufficient_evidence_level` 当前取值：`疑似隐患`、`疑似重大隐患`、`需人工复核`。
+- 新增或编辑规则时，只允许关联 `knowledge_clauses.verification_status = verified` 且 `current_status = 现行有效` 的正式条文。
+- 未启用规则可作为草稿暂存；任何启用规则都必须至少关联 1 条已校验正式条文，否则后端拒绝启用。
+- 归档规则会同时退出后续判定候选；删除语义采用归档优先，不做物理删除。
+- 内置种子规则覆盖消防通道、安全出口、消防设施器材、灭火器、应急照明、防火门、安全帽、高处作业、有限空间、特种设备等高频场景；导入时按本地已校验条文匹配依据，找不到依据的种子规则会跳过，不会强行启用。
 知识列表页面需要的返回字段：
 
 ```json

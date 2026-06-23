@@ -400,6 +400,54 @@ CREATE TABLE inspection_report_knowledge_refs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='报告引用依据快照表';
 
 -- ============================================================================
+-- 15. 隐患判定规则表（法规条文到隐患等级的人工规则映射）
+-- ============================================================================
+CREATE TABLE hazard_rules (
+  id                          INT           NOT NULL AUTO_INCREMENT,
+  seed_key                    VARCHAR(100)  DEFAULT NULL COMMENT '内置种子规则唯一标识，便于重复导入',
+  name                        VARCHAR(200)  NOT NULL COMMENT '规则名称',
+  category_id                 INT           DEFAULT NULL COMMENT '所属法规分类',
+  hazard_level                VARCHAR(50)   NOT NULL COMMENT '判定等级：一般隐患/疑似重大隐患/重大隐患/需人工复核等',
+  visible_fact_keywords       VARCHAR(500)  DEFAULT NULL COMMENT '可见事实关键词，供 AI 事实抽取和规则检索使用',
+  trigger_condition           TEXT          NOT NULL COMMENT '触发条件',
+  required_evidence           TEXT          NOT NULL COMMENT '所需证据',
+  image_evidence_supported    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '图片是否可独立支持判断',
+  insufficient_evidence_level VARCHAR(50)   NOT NULL DEFAULT '需人工复核' COMMENT '证据不足时默认结论',
+  rectification_template      TEXT          NOT NULL COMMENT '整改建议模板',
+  is_active                   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否启用',
+  status                      ENUM('active','archived') NOT NULL DEFAULT 'active' COMMENT '规则状态',
+  created_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_hazard_rules_seed_key (seed_key),
+  KEY idx_hr_category_id (category_id),
+  KEY idx_hr_hazard_level (hazard_level),
+  KEY idx_hr_is_active (is_active),
+  KEY idx_hr_status (status),
+  CONSTRAINT fk_hr_category
+    FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='隐患判定规则表';
+
+-- ============================================================================
+-- 16. 隐患规则-法规条款关联表
+-- ============================================================================
+CREATE TABLE hazard_rule_clause_refs (
+  rule_id    INT       NOT NULL COMMENT '规则ID',
+  clause_id  INT       NOT NULL COMMENT '正式法规条款ID',
+  sort       INT       NOT NULL DEFAULT 0 COMMENT '引用顺序',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (rule_id, clause_id),
+  KEY idx_hrcr_clause_id (clause_id),
+  KEY idx_hrcr_sort (sort),
+  CONSTRAINT fk_hrcr_rule
+    FOREIGN KEY (rule_id) REFERENCES hazard_rules (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_hrcr_clause
+    FOREIGN KEY (clause_id) REFERENCES knowledge_clauses (id)
+    ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='隐患规则关联法规条款表';
+-- ============================================================================
 -- 14. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
 -- ============================================================================
 CREATE TABLE action_logs (
