@@ -32,6 +32,7 @@ const schemaInit = {
     await this.step09KnowledgeClauses()
     await this.step09KnowledgeClauseDrafts()
     await this.step09InspectionReportKnowledgeRefs()
+    await this.step09HazardRules()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
     await this.step12_reportTemplates()
@@ -709,6 +710,75 @@ const schemaInit = {
       'FOREIGN KEY (report_id) REFERENCES inspection_reports (id) ON DELETE CASCADE ON UPDATE CASCADE')
   },
 
+  // =========================================================================
+  // Step 9.8: 隐患判定规则库（法规条文到隐患等级的人工规则映射）
+  // =========================================================================
+  async step09HazardRules() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS hazard_rules (
+        id                          INT           NOT NULL AUTO_INCREMENT,
+        seed_key                    VARCHAR(100)  DEFAULT NULL,
+        name                        VARCHAR(200)  NOT NULL,
+        category_id                 INT           DEFAULT NULL,
+        hazard_level                VARCHAR(50)   NOT NULL,
+        visible_fact_keywords       VARCHAR(500)  DEFAULT NULL,
+        trigger_condition           TEXT          NOT NULL,
+        required_evidence           TEXT          NOT NULL,
+        image_evidence_supported    TINYINT(1)    NOT NULL DEFAULT 0,
+        insufficient_evidence_level VARCHAR(50)   NOT NULL DEFAULT '需人工复核',
+        rectification_template      TEXT          NOT NULL,
+        is_active                   TINYINT(1)    NOT NULL DEFAULT 0,
+        status                      VARCHAR(20)   NOT NULL DEFAULT 'active',
+        created_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_hazard_rules_seed_key (seed_key),
+        KEY idx_hr_category_id (category_id),
+        KEY idx_hr_hazard_level (hazard_level),
+        KEY idx_hr_is_active (is_active),
+        KEY idx_hr_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS hazard_rule_clause_refs (
+        rule_id    INT       NOT NULL,
+        clause_id  INT       NOT NULL,
+        sort       INT       NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (rule_id, clause_id),
+        KEY idx_hrcr_clause_id (clause_id),
+        KEY idx_hrcr_sort (sort)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    for (const colDef of [
+      'seed_key VARCHAR(100) DEFAULT NULL',
+      'visible_fact_keywords VARCHAR(500) DEFAULT NULL',
+      'image_evidence_supported TINYINT(1) NOT NULL DEFAULT 0',
+      "insufficient_evidence_level VARCHAR(50) NOT NULL DEFAULT '需人工复核'",
+      'is_active TINYINT(1) NOT NULL DEFAULT 0',
+      "status VARCHAR(20) NOT NULL DEFAULT 'active'",
+      'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+    ]) {
+      await this._addColumn('hazard_rules', colDef)
+    }
+
+    await this._addIndex('hazard_rules', 'uk_hazard_rules_seed_key', 'UNIQUE KEY uk_hazard_rules_seed_key (seed_key)')
+    await this._addIndex('hazard_rules', 'idx_hr_category_id', 'KEY idx_hr_category_id (category_id)')
+    await this._addIndex('hazard_rules', 'idx_hr_hazard_level', 'KEY idx_hr_hazard_level (hazard_level)')
+    await this._addIndex('hazard_rules', 'idx_hr_is_active', 'KEY idx_hr_is_active (is_active)')
+    await this._addIndex('hazard_rules', 'idx_hr_status', 'KEY idx_hr_status (status)')
+    await this._addIndex('hazard_rule_clause_refs', 'idx_hrcr_clause_id', 'KEY idx_hrcr_clause_id (clause_id)')
+    await this._addIndex('hazard_rule_clause_refs', 'idx_hrcr_sort', 'KEY idx_hrcr_sort (sort)')
+
+    await this._addFK('hazard_rules', 'fk_hr_category',
+      'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('hazard_rule_clause_refs', 'fk_hrcr_rule',
+      'FOREIGN KEY (rule_id) REFERENCES hazard_rules (id) ON DELETE CASCADE ON UPDATE CASCADE')
+    await this._addFK('hazard_rule_clause_refs', 'fk_hrcr_clause',
+      'FOREIGN KEY (clause_id) REFERENCES knowledge_clauses (id) ON DELETE RESTRICT ON UPDATE CASCADE')
+  },
   // =========================================================================
   // Step 10: 操作日志表（补字段）
   // =========================================================================

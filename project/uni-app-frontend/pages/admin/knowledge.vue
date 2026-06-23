@@ -7,7 +7,8 @@
       </view>
       <view class="page-action-row">
         <view class="secondary-btn" @click="openCategoryModal">分类管理</view>
-        <view class="secondary-btn" @click="openDraftModal()">抽取草稿</view>`r`n        <view class="secondary-btn" @click="pickClauseCsv">导入条文CSV</view>
+        <view class="secondary-btn" @click="openDraftModal()">抽取草稿</view>
+        <view class="secondary-btn" @click="pickClauseCsv">导入条文CSV</view>
         <view class="primary-btn" @click="openAdd">上传文档</view>
       </view>
     </view>
@@ -137,12 +138,14 @@
             <text class="parse-tag" :class="parseStatusClass(item.parse_status)">
               {{ parseStatusText(item.parse_status) }}
             </text>
-            <text class="clause-count">{{ Number(item.clause_count || 0) }} 正式条款</text>`r`n            <text v-if="item.pending_draft_count" class="draft-count" @click="openDraftModal(item)">{{ item.pending_draft_count }} 待审草稿</text>
+            <text class="clause-count">{{ Number(item.clause_count || 0) }} 正式条款</text>
+            <text v-if="item.pending_draft_count" class="draft-count" @click="openDraftModal(item)">{{ item.pending_draft_count }} 待审草稿</text>
           </view>
           <text v-if="item.parse_message" class="parse-message">{{ item.parse_message }}</text>
         </view>
         <view class="card-actions">
-          <text class="action-link" @click="openDraftModal(item)">草稿</text>`r`n          <text class="action-link" @click="openEdit(item)">编辑</text>
+          <text class="action-link" @click="openDraftModal(item)">草稿</text>
+          <text class="action-link" @click="openEdit(item)">编辑</text>
           <text class="action-link dangerous" @click="deleteKnowledge(item)">归档</text>
         </view>
       </view>
