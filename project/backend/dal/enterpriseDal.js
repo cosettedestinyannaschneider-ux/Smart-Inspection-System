@@ -1,5 +1,18 @@
 const db = require('./db')
 
+/**
+ * 企业档案中的排查日期只保存日期部分；空值保留为空。
+ */
+const normalizeNullableDateOnly = (value) => {
+  if (!value) return null
+  const text = String(value).trim()
+  const datePart = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+  if (datePart) return datePart
+  const parsed = new Date(text)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return null
+}
+
 const enterpriseDal = {
   /**
    * 按用户所属部门推导企业
@@ -30,6 +43,58 @@ const enterpriseDal = {
   },
 
   /** 查询组织管理所需企业列表，不依赖历史 enterprises.user_id */
+  /** 搜索被检查客户企业，用于检查员创建检查任务前选择客户档案 */
+  async searchClients(keyword = '', limit = 20) {
+    const kw = `%${String(keyword || '').trim()}%`
+    const safeLimit = Math.min(Math.max(Number(limit || 20), 1), 100)
+    const [rows] = await db.execute(
+      `SELECT id, name, region, address, contact, phone, industry, enterprise_type, scale,
+              production_process, inspector_name, inspection_date, project_name, inspection_status, status, updated_at
+       FROM enterprises
+       WHERE status = 'active'
+         AND (? = '%%' OR name LIKE ? OR region LIKE ? OR address LIKE ? OR contact LIKE ? OR industry LIKE ?)
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ${safeLimit}`,
+      [kw, kw, kw, kw, kw, kw]
+    )
+    return rows
+  },
+
+  /** 新建或更新被检查客户企业，避免前端直接依赖“用户所属企业”旧模型 */
+  async upsertClient(data = {}) {
+    const name = String(data.name || '').trim()
+    if (!name) throw new Error('企业名称不能为空')
+    const existed = data.id ? await this.findById(Number(data.id)) : await this.findByName(name)
+    if (existed) {
+      await this.updateById(existed.id, {
+        name,
+        region: data.region || existed.region || null,
+        address: data.address || existed.address || null,
+        contact: data.contact || existed.contact || null,
+        phone: data.phone || existed.phone || null,
+        industry: data.industry || existed.industry || null,
+        enterprise_type: data.enterprise_type || existed.enterprise_type || null,
+        scale: data.scale || existed.scale || null,
+        production_process: data.production_process || existed.production_process || null,
+        inspector_name: data.inspector_name || existed.inspector_name || null,
+        inspection_date: normalizeNullableDateOnly(data.inspection_date) || existed.inspection_date || null,
+        project_name: data.project_name || existed.project_name || null,
+      })
+      return this.findById(existed.id)
+    }
+    const [res] = await db.execute(
+      `INSERT INTO enterprises
+       (name, region, address, contact, phone, industry, enterprise_type, scale,
+        production_process, inspector_name, inspection_date, project_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [name, data.region || null, data.address || null, data.contact || null, data.phone || null,
+        data.industry || null, data.enterprise_type || null, data.scale || null,
+        data.production_process || null, data.inspector_name || null, normalizeNullableDateOnly(data.inspection_date),
+        data.project_name || null]
+    )
+    return this.findById(res.insertId)
+  },
+
   async findOrganizationList() {
     const [rows] = await db.execute(
       `SELECT e.id, e.name, e.status, e.created_at, e.updated_at,
@@ -60,20 +125,33 @@ const enterpriseDal = {
     const [rows] = await db.execute(
       `SELECT
          (SELECT COUNT(*) FROM departments WHERE enterprise_id = ?) AS departments,
+         (SELECT COUNT(*) FROM inspection_tasks WHERE enterprise_id = ?) AS inspection_tasks,
          (SELECT COUNT(*) FROM hazard_images WHERE enterprise_id = ?) AS hazard_images,
          (SELECT COUNT(*) FROM inspection_reports WHERE enterprise_id = ?) AS inspection_reports`,
-      [id, id, id]
+      [id, id, id, id]
     )
     return {
       departments: Number(rows[0]?.departments || 0),
+      inspection_tasks: Number(rows[0]?.inspection_tasks || 0),
       hazard_images: Number(rows[0]?.hazard_images || 0),
       inspection_reports: Number(rows[0]?.inspection_reports || 0),
     }
   },
 
   /** 删除已通过业务保护校验的企业 */
+  /** 企业归档与恢复 */
   async deleteById(id) {
     return await db.execute('DELETE FROM enterprises WHERE id = ?', [id])
+  },
+
+  /** 企业归档与恢复 */
+  async archiveById(id) {
+    return await db.execute("UPDATE enterprises SET status = 'archived' WHERE id = ?", [id])
+  },
+
+  /** 企业归档与恢复 */
+  async restoreById(id) {
+    return await db.execute("UPDATE enterprises SET status = 'active' WHERE id = ?", [id])
   },
 
   async listByUserId(userId) {
@@ -104,7 +182,7 @@ const enterpriseDal = {
       [
         data.name, data.region, data.address, data.contact, data.phone,
         data.industry || null, data.enterprise_type || null, data.scale || null,
-        data.production_process || null, data.inspector_name || null, data.inspection_date || null,
+        data.production_process || null, data.inspector_name || null, normalizeNullableDateOnly(data.inspection_date),
         data.project_name || null, enterpriseId
       ]
     )
@@ -185,32 +263,38 @@ const enterpriseDal = {
          e.inspection_status, e.status, e.updated_at, e.project_name,
          COALESCE(u.username, '') AS username,
          COALESCE(img_stats.image_count, 0) AS image_count,
-         COALESCE(img_stats.hazard_count, 0) AS hazard_count,
-         COALESCE(img_stats.pending_count, 0) AS pending_count,
-         COALESCE(img_stats.hazard_count - img_stats.pending_count, 0) AS rectified_count,
+         COALESCE(rep_stats.hazard_count, 0) AS hazard_count,
+         COALESCE(rep_stats.pending_count, 0) AS pending_count,
+         COALESCE(rep_stats.rectified_count, 0) AS rectified_count,
          COALESCE(rep_stats.analysis_count, 0) AS analysis_count,
          COALESCE(rep_stats.report_count, 0) AS report_count
        FROM enterprises e
        LEFT JOIN (
          /** 每个企业关联的隐患图片统计 */
          SELECT
-           enterprise_id,
-           COUNT(*) AS image_count,
-           SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS hazard_count,
-           SUM(CASE WHEN status = 'active' AND (hazard_type IS NULL OR hazard_type NOT LIKE '%已整改%') THEN 1 ELSE 0 END) AS pending_count
-         FROM hazard_images
-         WHERE enterprise_id IS NOT NULL
-         GROUP BY enterprise_id
+           hi.enterprise_id,
+           COUNT(*) AS image_count
+         FROM hazard_images hi
+         LEFT JOIN inspection_tasks t ON t.id = hi.inspection_task_id
+         WHERE hi.enterprise_id IS NOT NULL
+           AND hi.status = 'active'
+           AND (hi.inspection_task_id IS NULL OR t.status <> 'archived')
+         GROUP BY hi.enterprise_id
        ) img_stats ON img_stats.enterprise_id = e.id
        LEFT JOIN (
          /** 每个企业关联的排查报告统计 */
          SELECT
-           enterprise_id,
-           COUNT(DISTINCT id) AS analysis_count,
-           COUNT(DISTINCT id) AS report_count
-         FROM inspection_reports
-         WHERE enterprise_id IS NOT NULL
-         GROUP BY enterprise_id
+           ir.enterprise_id,
+           COUNT(DISTINCT ir.id) AS analysis_count,
+           SUM(CASE WHEN ir.report_allowed = 1 THEN 1 ELSE 0 END) AS hazard_count,
+           SUM(CASE WHEN ir.report_allowed = 1 AND ir.review_status <> 'confirmed' THEN 1 ELSE 0 END) AS pending_count,
+           SUM(CASE WHEN ir.report_allowed = 1 AND ir.review_status = 'confirmed' THEN 1 ELSE 0 END) AS rectified_count,
+           SUM(CASE WHEN ir.word_path IS NOT NULL OR ir.pdf_path IS NOT NULL THEN 1 ELSE 0 END) AS report_count
+         FROM inspection_reports ir
+         LEFT JOIN inspection_tasks t ON t.id = ir.inspection_task_id
+         WHERE ir.enterprise_id IS NOT NULL
+           AND (ir.inspection_task_id IS NULL OR t.status <> 'archived')
+         GROUP BY ir.enterprise_id
        ) rep_stats ON rep_stats.enterprise_id = e.id
        LEFT JOIN users u ON e.user_id = u.id
        ${whereClause}
@@ -222,22 +306,26 @@ const enterpriseDal = {
     for (const row of rows) {
       /** 主要隐患类型（取出现次数最多的前 5 种） */
       const [hazardTypes] = await db.execute(
-        `SELECT hazard_type, COUNT(*) AS cnt
-         FROM hazard_images
-         WHERE enterprise_id = ? AND hazard_type IS NOT NULL AND status = 'active'
-         GROUP BY hazard_type
+        `SELECT hi.hazard_type, COUNT(*) AS cnt
+         FROM hazard_images hi
+         LEFT JOIN inspection_tasks t ON t.id = hi.inspection_task_id
+         WHERE hi.enterprise_id = ? AND hi.hazard_type IS NOT NULL AND hi.status = 'active'
+           AND (hi.inspection_task_id IS NULL OR t.status <> 'archived')
+         GROUP BY hi.hazard_type
          ORDER BY cnt DESC
          LIMIT 5`,
         [row.id]
       )
-      row.main_hazards = hazardTypes.map((h) => h.hazard_type)
+      row.main_hazards = Number(row.hazard_count || 0) > 0 ? hazardTypes.map((h) => h.hazard_type) : []
 
       /** 最近上传的隐患图片名称 */
       const [recentImages] = await db.execute(
         `SELECT original_name
-         FROM hazard_images
-         WHERE enterprise_id = ? AND status = 'active'
-         ORDER BY created_at DESC
+         FROM hazard_images hi
+         LEFT JOIN inspection_tasks t ON t.id = hi.inspection_task_id
+         WHERE hi.enterprise_id = ? AND hi.status = 'active'
+           AND (hi.inspection_task_id IS NULL OR t.status <> 'archived')
+         ORDER BY hi.created_at DESC
          LIMIT 3`,
         [row.id]
       )
@@ -245,14 +333,55 @@ const enterpriseDal = {
 
       /** 最近的 AI 分析摘要 */
       const [recentAnalyses] = await db.execute(
-        `SELECT COALESCE(title, '排查分析') AS title, created_at
-         FROM inspection_reports
-         WHERE enterprise_id = ?
-         ORDER BY created_at DESC
+        `SELECT COALESCE(ir.title, '排查分析') AS title, ir.created_at
+         FROM inspection_reports ir
+         LEFT JOIN inspection_tasks t ON t.id = ir.inspection_task_id
+         WHERE ir.enterprise_id = ?
+           AND (ir.inspection_task_id IS NULL OR t.status <> 'archived')
+         ORDER BY ir.created_at DESC
          LIMIT 3`,
         [row.id]
       )
       row.recent_analyses = recentAnalyses.map((a) => a.title)
+
+      /** 企业归档与恢复 */
+      const [tasks] = await db.execute(
+        `SELECT
+           t.id, t.task_no, t.inspection_date, t.location, t.requirement, t.status, t.updated_at,
+           u.username AS inspector_name,
+           COALESCE(img_stats.image_count, 0) AS image_count,
+           COALESCE(rep_stats.report_count, 0) AS report_count
+         FROM inspection_tasks t
+         LEFT JOIN users u ON u.id = t.inspector_id
+         LEFT JOIN (
+           SELECT inspection_task_id, COUNT(*) AS image_count
+           FROM hazard_images
+           WHERE inspection_task_id IS NOT NULL AND status = 'active'
+           GROUP BY inspection_task_id
+         ) img_stats ON img_stats.inspection_task_id = t.id
+         LEFT JOIN (
+           SELECT inspection_task_id, COUNT(*) AS report_count
+           FROM inspection_reports
+           WHERE inspection_task_id IS NOT NULL AND report_allowed = 1
+           GROUP BY inspection_task_id
+         ) rep_stats ON rep_stats.inspection_task_id = t.id
+         WHERE t.enterprise_id = ?
+         ORDER BY t.updated_at DESC, t.id DESC
+         LIMIT 20`,
+        [row.id]
+      )
+      row.inspection_tasks = tasks
+
+      /** 企业已分配检查员，供管理员确认客户企业权限范围 */
+      const [assignedInspectors] = await db.execute(
+        `SELECT a.inspector_id, a.status, u.username
+         FROM enterprise_inspector_assignments a
+         INNER JOIN users u ON u.id = a.inspector_id
+         WHERE a.enterprise_id = ?
+         ORDER BY a.status ASC, u.username ASC`,
+        [row.id]
+      )
+      row.assigned_inspectors = assignedInspectors
 
       /** 关联报告列表（含下载路径） */
       const [reports] = await db.execute(
@@ -261,7 +390,7 @@ const enterpriseDal = {
            COUNT(irk.id) AS knowledge_ref_count
          FROM inspection_reports ir
          LEFT JOIN inspection_report_knowledge_refs irk ON irk.report_id = ir.id
-         WHERE enterprise_id = ? AND word_path IS NOT NULL
+         WHERE ir.enterprise_id = ? AND ir.word_path IS NOT NULL
          GROUP BY ir.id, ir.title, ir.created_at, ir.word_path, ir.pdf_path
          ORDER BY ir.created_at DESC
          LIMIT 20`,
@@ -313,7 +442,7 @@ const enterpriseDal = {
         data.contact || null, data.phone || null,
         data.industry || null, data.enterprise_type || null, data.scale || null,
         data.production_process || null, data.inspector_name || null,
-        data.inspection_date || null,
+        normalizeNullableDateOnly(data.inspection_date),
         data.inspection_status || 'pending', data.status || 'active',
         data.project_name || null, enterpriseId
       ]

@@ -3,7 +3,7 @@
     <!-- 页面标题与导出操作 -->
     <view class="page-heading">
       <view class="heading-copy"><text class="heading-title">企业数据查询</text><text class="heading-desc">查询企业档案、检查情况、隐患整改和报告记录</text></view>
-      <view class="export-btn" @click="exportExcel">导出当前结果</view>
+      <view class="heading-actions"><view class="create-btn" @click="openCreate">新增企业</view><view class="export-btn" @click="exportExcel">导出当前结果</view></view>
     </view>
 
     <!-- 当前筛选结果统计 -->
@@ -68,7 +68,13 @@
           <text class="enterprise-meta">{{ buildEnterpriseMeta(item) }}</text>
           <text class="enterprise-address">{{ normalizeDisplayText(item.address) }}</text>
         </view>
-        <view class="head-actions"><text class="edit-link" @click.stop="openEdit(item)">编辑信息</text><text class="expand-link">{{ expandedId === item.id ? '收起详情' : '查看详情' }}</text></view>
+        <view class="head-actions">
+          <text class="edit-link" @click.stop="openEdit(item)">编辑信息</text>
+          <text class="assign-link" @click.stop="openAssignModal(item)">分配检查员</text>
+          <text v-if="item.status === 'active'" class="archive-link" @click.stop="archiveEnterprise(item)">归档企业</text>
+          <text v-else class="restore-link" @click.stop="restoreEnterprise(item)">恢复企业</text>
+          <text class="expand-link">{{ expandedId === item.id ? '收起详情' : '查看详情' }}</text>
+        </view>
       </view>
 
       <!-- 企业核心检查指标 -->
@@ -102,6 +108,7 @@
             <view><text class="detail-label">企业联系人</text><text>{{ normalizeDisplayText(item.contact) }}</text></view>
             <view><text class="detail-label">联系电话</text><text>{{ normalizeDisplayText(item.phone) }}</text></view>
             <view><text class="detail-label">所属检查员</text><text>{{ normalizeDisplayText(item.username) }}</text></view>
+            <view class="full-row"><text class="detail-label">已分配检查员</text><text>{{ formatAssignedInspectors(item) }}</text></view>
             <view><text class="detail-label">现场排查人员</text><text>{{ normalizeDisplayText(item.inspector_name) }}</text></view>
             <view><text class="detail-label">最近排查日期</text><text>{{ normalizeDisplayText(item.inspection_date) }}</text></view>
             <view><text class="detail-label">排查状态</text><text>{{ getInspectionStatusLabel(item.inspection_status) }}</text></view>
@@ -126,7 +133,20 @@
           </view>
         </view>
 
-        <!-- 企业关联报告记录 -->
+
+        <!-- 企业下的检查任务归档 -->
+        <view class="detail-section">
+          <text class="section-title">检查任务归档</text>
+          <view v-if="!item.inspection_tasks || item.inspection_tasks.length === 0" class="no-report">暂无检查任务</view>
+          <view v-for="task in item.inspection_tasks || []" :key="task.id" class="inspection-task-row">
+            <view class="report-info">
+              <text class="report-name">{{ normalizeDisplayText(task.task_no, '未编号任务') }}</text>
+              <text class="report-date">{{ normalizeDisplayText(task.inspection_date, '未填写日期') }} - {{ normalizeDisplayText(task.inspector_name, '未知检查员') }} - {{ task.status === 'archived' ? '已归档' : '可继续' }}</text>
+              <text class="report-ref-count">图片 {{ Number(task.image_count || 0) }} 张 - 报告 {{ Number(task.report_count || 0) }} 份</text>
+              <text v-if="task.location || task.requirement" class="report-ref-item">{{ normalizeDisplayText(task.location || task.requirement, '') }}</text>
+            </view>
+          </view>
+        </view>
         <view class="detail-section">
           <text class="section-title">报告记录</text>
           <view v-if="!item.reports || item.reports.length === 0" class="no-report">暂无报告记录</view>
@@ -148,27 +168,42 @@
     <!-- 企业信息编辑弹窗，保存后更新当前最新数据 -->
     <view v-if="showEditModal" class="modal-mask" @click="closeEdit">
       <view class="modal-panel" @click.stop="">
-        <view class="modal-header"><view><text class="modal-title">编辑企业信息</text><text class="modal-desc">管理员维护的是全局企业档案，保存后会影响关联检查员和报告展示</text></view><text class="modal-close" @click="closeEdit">×</text></view>
+        <view class="modal-header"><view><text class="modal-title">{{ isCreateMode ? '新增企业信息' : '编辑企业信息' }}</text><text class="modal-desc">管理员维护的是全局客户企业档案，检查员只能选择已分配企业开展任务</text></view><text class="modal-close" @click="closeEdit">×</text></view>
         <scroll-view scroll-y class="modal-body">
           <view class="edit-grid">
             <view class="form-item full"><text class="form-label">企业名称</text><input v-model="editForm.name" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">所属区域</text><input v-model="editForm.region" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">所属行业</text><input v-model="editForm.industry" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">企业类型</text><input v-model="editForm.enterprise_type" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">企业规模</text><input v-model="editForm.scale" class="form-input" /></view>
+            <view class="form-item"><text class="form-label">所属区域</text><input v-model="editForm.region" class="form-input" placeholder="可自由填写省、市、区或园区" /></view>
+            <view class="form-item custom-selector" :class="{ expanded: dropdownState.industry }"><text class="form-label">所属行业</text><view class="form-picker" @click.stop="toggleStatusDropdown('industry')">{{ editForm.industry || '请选择行业' }}⌄</view><view v-if="dropdownState.industry" class="selector-options"><view v-for="option in industryEditOptions" :key="option" class="selector-option" :class="{ active: editForm.industry === option }" @click.stop="selectEditIndustry(option)">{{ option }}</view></view></view>
+            <view class="form-item custom-selector" :class="{ expanded: dropdownState.enterpriseType }"><text class="form-label">企业类型</text><view class="form-picker" @click.stop="toggleStatusDropdown('enterpriseType')">{{ editForm.enterprise_type || '请选择类型' }}⌄</view><view v-if="dropdownState.enterpriseType" class="selector-options"><view v-for="option in enterpriseTypeEditOptions" :key="option" class="selector-option" :class="{ active: editForm.enterprise_type === option }" @click.stop="selectEditEnterpriseType(option)">{{ option }}</view></view></view>
+            <view class="form-item custom-selector" :class="{ expanded: dropdownState.scale }"><text class="form-label">企业规模</text><view class="form-picker" @click.stop="toggleStatusDropdown('scale')">{{ editForm.scale || '请选择规模' }}⌄</view><view v-if="dropdownState.scale" class="selector-options"><view v-for="option in scaleEditOptions" :key="option" class="selector-option" :class="{ active: (editForm.scale || '未填写') === option }" @click.stop="selectEditScale(option)">{{ option }}</view></view></view>
             <view class="form-item"><text class="form-label">联系人</text><input v-model="editForm.contact" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">联系电话</text><input v-model="editForm.phone" class="form-input" /></view>
+            <view class="form-item"><text class="form-label">联系电话</text><input v-model="editForm.phone" class="form-input" type="text" /></view>
             <view class="form-item"><text class="form-label">现场排查人员</text><input v-model="editForm.inspector_name" class="form-input" /></view>
-            <view class="form-item"><text class="form-label">排查日期</text><input v-model="editForm.inspection_date" class="form-input" /></view>
-            <view class="form-item custom-selector" :class="{ expanded: dropdownState.inspection }"><text class="form-label">排查状态</text><view class="form-picker" @click.stop="toggleStatusDropdown('inspection')">{{ getInspectionStatusLabel(editForm.inspection_status) }}⌄</view><view v-if="dropdownState.inspection" class="selector-options"><view v-for="option in inspectionStatusOptions" :key="option.value" class="selector-option" :class="{ active: editForm.inspection_status === option.value }" @click.stop="selectEditInspectionStatus(option)">{{ option.label }}</view></view></view>
-            <view class="form-item custom-selector" :class="{ expanded: dropdownState.archive }"><text class="form-label">档案状态</text><view class="form-picker" @click.stop="toggleStatusDropdown('archive')">{{ getArchiveStatusLabel(editForm.status) }}⌄</view><view v-if="dropdownState.archive" class="selector-options"><view v-for="option in editStatusOptions" :key="option.value" class="selector-option" :class="{ active: editForm.status === option.value }" @click.stop="selectEditArchiveStatus(option)">{{ option.label }}</view></view></view>
+            <view class="form-item"><text class="form-label">排查日期</text><picker mode="date" :value="editForm.inspection_date" @change="changeEditInspectionDate"><view class="form-picker">{{ editForm.inspection_date || '请选择日期' }}v</view></picker></view>
+            <view class="form-item custom-selector" :class="{ expanded: dropdownState.inspection }"><text class="form-label">排查状态</text><view class="form-picker" @click.stop="toggleStatusDropdown('inspection')">{{ getInspectionStatusLabel(editForm.inspection_status) }}v</view><view v-if="dropdownState.inspection" class="selector-options"><view v-for="option in inspectionStatusOptions" :key="option.value" class="selector-option" :class="{ active: editForm.inspection_status === option.value }" @click.stop="selectEditInspectionStatus(option)">{{ option.label }}</view></view></view>
+            <view class="form-item custom-selector" :class="{ expanded: dropdownState.archive }"><text class="form-label">档案状态</text><view class="form-picker" @click.stop="toggleStatusDropdown('archive')">{{ getArchiveStatusLabel(editForm.status) }}v</view><view v-if="dropdownState.archive" class="selector-options"><view v-for="option in editStatusOptions" :key="option.value" class="selector-option" :class="{ active: editForm.status === option.value }" @click.stop="selectEditArchiveStatus(option)">{{ option.label }}</view></view></view>
             <view class="form-item full"><text class="form-label">详细地址</text><input v-model="editForm.address" class="form-input" /></view>
             <view class="form-item full"><text class="form-label">生产工艺</text><textarea v-model="editForm.production_process" class="form-textarea" /></view>
           </view>
         </scroll-view>
-        <view class="modal-footer"><view class="cancel-btn" @click="closeEdit">取消</view><view class="save-btn" @click="saveEnterprise">保存最新数据</view></view>
+        <view class="modal-footer"><text v-if="editError" class="form-error">{{ editError }}</text><view class="cancel-btn" @click="closeEdit">取消</view><view class="save-btn" :class="{ disabled: editSaving }" @click="saveEnterprise">{{ editSaving ? '保存中...' : (isCreateMode ? '新增企业' : '保存最新数据') }}</view></view>
       </view>
     </view>
+    <view v-if="showAssignModal" class="modal-mask" @click="closeAssignModal">
+      <view class="modal-panel assign-panel" @click.stop="">
+        <view class="modal-header"><view><text class="modal-title">分配检查员</text><text class="modal-desc">检查员只能看到分配给自己的客户企业，并在企业下创建检查任务</text></view><text class="modal-close" @click="closeAssignModal">×</text></view>
+        <scroll-view scroll-y class="modal-body assign-body">
+          <view v-for="inspector in inspectorOptions" :key="inspector.id" class="assign-row" :class="{ active: selectedInspectorIds.includes(Number(inspector.id)) }" @click="toggleInspector(inspector.id)">
+            <view class="assign-avatar">{{ inspector.username.slice(0, 1) }}</view>
+            <view class="assign-copy"><text class="assign-name">{{ inspector.username }}</text><text class="assign-meta">检查员 ID：{{ inspector.id }} · {{ inspector.status === 'disabled' ? '已禁用' : '正常' }}</text></view>
+            <text class="assign-check">{{ selectedInspectorIds.includes(Number(inspector.id)) ? '已选' : '选择' }}</text>
+          </view>
+          <view v-if="inspectorOptions.length === 0" class="empty-card">暂无检查员账号，请先在用户管理中创建检查员</view>
+        </scroll-view>
+        <view class="modal-footer"><view class="cancel-btn" @click="closeAssignModal">取消</view><view class="save-btn" @click="saveAssignments">保存分配</view></view>
+      </view>
+    </view>
+
 
   </AdminShell>
 </template>
@@ -192,16 +227,23 @@ const categoryMode = ref('status')
 const activeCategory = ref('全部')
 /** 企业编辑弹窗状态 */
 const showEditModal = ref(false)
+const showAssignModal = ref(false)
+const assigningEnterprise = ref(null)
+const inspectorOptions = ref([])
+const selectedInspectorIds = ref([])
+const isCreateMode = ref(false)
+const editError = ref('')
+const editSaving = ref(false)
 /** 当前企业编辑表单 */
 const editForm = ref({})
 /** 三个状态下拉框的展开状态 */
-const dropdownState = ref({ filter: false, inspection: false, archive: false })
+const dropdownState = ref({ filter: false, inspection: false, archive: false, industry: false, enterpriseType: false, scale: false })
 /** 企业多维度查询条件 */
 const query = ref({ keyword: '', industry: '全部行业', enterprise_type: '全部类型', risk_level: '全部风险', status: 'all', status_label: '全部状态', date: '' })
 /** 行业筛选选项 */
-const industryOptions = ['全部行业', '建筑施工', '危险化学品', '煤矿安全']
+const industryOptions = ['全部行业', '建筑施工安全', '消防安全', '工贸行业安全', '危险化学品与化工安全', '特种设备安全', '职业健康与劳动安全', '应急与事故管理', '其他专项安全']
 /** 企业类型筛选选项 */
-const typeOptions = ['全部类型', '有限责任公司', '股份有限公司', '国有企业']
+const typeOptions = ['全部类型', '有限责任公司', '股份有限公司', '个体工商户', '国有企业', '事业单位', '其他']
 /** 风险等级筛选选项 */
 const riskOptions = ['全部风险', '高风险', '中风险', '低风险']
 /** 企业状态筛选选项 */
@@ -215,6 +257,9 @@ const inspectionStatusOptions = [
 ]
 /** 企业编辑档案状态选项 */
 const editStatusOptions = [{ label: '正常', value: 'active' }, { label: '已归档', value: 'archived' }]
+const industryEditOptions = industryOptions.filter((item) => item !== '全部行业')
+const enterpriseTypeEditOptions = typeOptions.filter((item) => item !== '全部类型')
+const scaleEditOptions = ['未填写', '微型', '小型', '中型', '大型']
 /** 当前分类模式对应的分类选项 */
 const categoryOptions = computed(() => ['全部', ...new Set(list.value.map(item => categoryMode.value === 'status' ? item.inspection_status : item.region))])
 
@@ -237,6 +282,17 @@ const showRequestError = (error) => {
 }
 
 /** 前端兜底展示文本，避免空值、问号占位或明显乱码影响演示观感 */
+
+/** Convert MySQL DATE or datetime text into YYYY-MM-DD for date picker. */
+const toDateOnly = (value) => {
+  if (!value) return ''
+  const text = String(value).trim()
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/)
+  if (match) return match[0]
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
+}
+
 const normalizeDisplayText = (value, fallback = '未填写') => {
   if (value === null || value === undefined) return fallback
   const text = String(value).trim()
@@ -277,6 +333,11 @@ const normalizeList = (values, fallback = '暂无记录') => {
   return list.length ? list : [fallback]
 }
 
+const formatAssignedInspectors = (item = {}) => {
+  const list = Array.isArray(item.assigned_inspectors) ? item.assigned_inspectors.filter((row) => row.status === 'active') : []
+  return list.length ? list.map((row) => row.username).join('、') : '未分配'
+}
+
 /** 根据全部查询条件筛选企业 */
 const filteredList = computed(() => {
   const text = query.value.keyword.trim().toLowerCase()
@@ -299,11 +360,13 @@ const sortedList = computed(() => [...filteredList.value].sort((a, b) => {
   return (b.inspection_date || '').localeCompare(a.inspection_date || '')
 }))
 /** 当前筛选结果隐患总数 */
-const hazardTotal = computed(() => filteredList.value.reduce((total, item) => total + (item.hazard_count || 0), 0))
+const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
+const clampRate = (value) => Math.min(100, Math.max(0, Math.round(safeNumber(value))))
+const hazardTotal = computed(() => filteredList.value.reduce((total, item) => total + safeNumber(item.hazard_count), 0))
 /** 当前筛选结果待整改隐患数 */
-const pendingTotal = computed(() => filteredList.value.reduce((total, item) => total + (item.pending_count || 0), 0))
+const pendingTotal = computed(() => filteredList.value.reduce((total, item) => total + safeNumber(item.pending_count), 0))
 /** 当前筛选结果总体整改率 */
-const rectificationRate = computed(() => hazardTotal.value ? Math.round((hazardTotal.value - pendingTotal.value) / hazardTotal.value * 100) : 0)
+const rectificationRate = computed(() => hazardTotal.value ? clampRate((hazardTotal.value - pendingTotal.value) / hazardTotal.value * 100) : 0)
 
 /** 公共框架鉴权完成后加载企业综合查询数据 */
 const handleAdminReady = async (admin) => {
@@ -352,10 +415,10 @@ const changeRisk = event => { query.value.risk_level = riskOptions[event.detail.
 /** 切换指定状态下拉框，同时关闭其他状态下拉框 */
 const toggleStatusDropdown = type => {
   const nextVisible = !dropdownState.value[type]
-  dropdownState.value = { filter: false, inspection: false, archive: false, [type]: nextVisible }
+  dropdownState.value = { filter: false, inspection: false, archive: false, industry: false, enterpriseType: false, scale: false, [type]: nextVisible }
 }
 /** 关闭全部状态下拉框 */
-const closeStatusDropdowns = () => { dropdownState.value = { filter: false, inspection: false, archive: false } }
+const closeStatusDropdowns = () => { dropdownState.value = { filter: false, inspection: false, archive: false, industry: false, enterpriseType: false, scale: false } }
 /** 选择企业档案筛选状态 */
 const selectFilterStatus = option => {
   query.value.status = option.value
@@ -366,34 +429,86 @@ const selectFilterStatus = option => {
 const selectEditInspectionStatus = option => { editForm.value.inspection_status = option.value; closeStatusDropdowns() }
 /** 选择编辑表单档案状态，接口仍提交英文枚举值 */
 const selectEditArchiveStatus = option => { editForm.value.status = option.value; closeStatusDropdowns() }
+const selectEditIndustry = value => { editForm.value.industry = value; closeStatusDropdowns() }
+const selectEditEnterpriseType = value => { editForm.value.enterprise_type = value; closeStatusDropdowns() }
+const selectEditScale = value => { editForm.value.scale = value === '未填写' ? '' : value; closeStatusDropdowns() }
+const changeEditInspectionDate = event => { editForm.value.inspection_date = event.detail.value }
+const isValidPhone = value => {
+  const phone = String(value || '').trim()
+  if (!phone) return true
+  return /^1[3-9]\d{9}$/.test(phone) || /^0\d{2,3}-?\d{7,8}$/.test(phone) || /^400-?\d{3}-?\d{4}$/.test(phone)
+}
 /** 清空全部查询条件并重新查询 */
 const clearFilters = () => { closeStatusDropdowns(); query.value = { keyword: '', industry: '全部行业', enterprise_type: '全部类型', risk_level: '全部风险', status: 'all', status_label: '全部状态', date: '' }; fetchEnterpriseQuery() }
 /** 展开或收起企业详情 */
 const toggle = id => { expandedId.value = expandedId.value === id ? null : id }
 /** 计算单个企业整改完成率 */
-const getRectificationRate = item => item.hazard_count ? Math.round((item.rectified_count || 0) / item.hazard_count * 100) : 0
+const getRectificationRate = item => safeNumber(item.hazard_count) ? clampRate(safeNumber(item.rectified_count) / safeNumber(item.hazard_count) * 100) : 0
+const createBlankEnterpriseForm = () => ({
+  id: null,
+  name: '',
+  region: '',
+  address: '',
+  industry: '',
+  enterprise_type: '',
+  scale: '',
+  contact: '',
+  phone: '',
+  inspector_name: '',
+  inspection_date: '',
+  inspection_status: 'pending',
+  status: 'active',
+  production_process: '',
+  project_name: ''
+})
+
+/** 打开企业新增弹窗 */
+const openCreate = () => {
+  closeStatusDropdowns()
+  isCreateMode.value = true
+  editError.value = ''
+  editForm.value = createBlankEnterpriseForm()
+  showEditModal.value = true
+}
+
 /** 打开企业编辑弹窗 */
-const openEdit = item => { closeStatusDropdowns(); editForm.value = { ...item }; showEditModal.value = true }
+const openEdit = item => {
+  closeStatusDropdowns()
+  isCreateMode.value = false
+  editError.value = ''
+  editForm.value = { ...createBlankEnterpriseForm(), ...item, inspection_date: toDateOnly(item.inspection_date) }
+  showEditModal.value = true
+}
 /** 关闭企业编辑弹窗 */
-const closeEdit = () => { showEditModal.value = false; closeStatusDropdowns() }
+const closeEdit = () => { showEditModal.value = false; editError.value = ''; editSaving.value = false; closeStatusDropdowns() }
+
+const validateEditForm = () => {
+  if (!String(editForm.value.name || '').trim()) return '请输入企业名称'
+  if (!String(editForm.value.industry || '').trim()) return '请选择所属行业'
+  if (!String(editForm.value.enterprise_type || '').trim()) return '请选择企业类型'
+  if (!String(editForm.value.scale || '').trim()) return '请选择企业规模'
+  if (!isValidPhone(editForm.value.phone)) return '联系电话格式不正确，可填写 11 位手机号、区号座机、400 电话，也可以留空'
+  return ''
+}
 
 /** 调用后端接口保存企业完整档案 */
 const saveEnterprise = async () => {
-  if (!String(editForm.value.name || '').trim()) return uni.showToast({ title: '请输入企业名称', icon: 'none' })
-  uni.showModal({
-    title: '确认保存企业档案',
-    content: '本次修改会更新企业全局基础档案，并影响关联检查员、历史报告展示和后续统计。确定继续保存吗？',
-    success: async (result) => {
-      if (!result.confirm) return
-      await submitEnterpriseUpdate()
-    }
-  })
+  const error = validateEditForm()
+  if (error) {
+    editError.value = error
+    uni.showToast({ title: error, icon: 'none' })
+    return
+  }
+  await submitEnterpriseUpdate()
 }
 
-/** 真正提交企业档案更新，供二次确认后调用 */
+/** 真正提交企业档案更新，成功后自动关闭弹窗并刷新列表 */
 const submitEnterpriseUpdate = async () => {
+  if (editSaving.value) return
+  editSaving.value = true
+  editError.value = ''
   try {
-    await postAdmin('/api/admin/enterprises/update', {
+    const payload = {
       id: editForm.value.id,
       name: editForm.value.name,
       region: editForm.value.region,
@@ -404,14 +519,88 @@ const submitEnterpriseUpdate = async () => {
       contact: editForm.value.contact,
       phone: editForm.value.phone,
       inspector_name: editForm.value.inspector_name,
-      inspection_date: editForm.value.inspection_date,
+      inspection_date: toDateOnly(editForm.value.inspection_date),
       inspection_status: editForm.value.inspection_status,
       status: editForm.value.status,
-      production_process: editForm.value.production_process
-    })
+      production_process: editForm.value.production_process,
+      project_name: editForm.value.project_name
+    }
+    await postAdmin(isCreateMode.value ? '/api/admin/enterprises/create' : '/api/admin/enterprises/update', payload)
     showEditModal.value = false
     await fetchEnterpriseQuery()
-    uni.showToast({ title: '企业档案已更新', icon: 'success' })
+    uni.showToast({ title: isCreateMode.value ? '企业档案已新增' : '企业档案已更新', icon: 'success' })
+  } catch (error) {
+    editError.value = error?.message || '保存失败'
+    showRequestError(error)
+  } finally {
+    editSaving.value = false
+  }
+}
+
+const archiveEnterprise = async (item) => {
+  if (!item?.id) return
+  try {
+    await postAdmin('/api/admin/enterprises/delete', { id: item.id })
+    await fetchEnterpriseQuery()
+    uni.showToast({ title: '企业已归档', icon: 'success' })
+  } catch (error) { showRequestError(error) }
+}
+
+const restoreEnterprise = async (item) => {
+  if (!item?.id) return
+  try {
+    await postAdmin('/api/admin/enterprises/restore', { id: item.id })
+    await fetchEnterpriseQuery()
+    uni.showToast({ title: '企业已恢复', icon: 'success' })
+  } catch (error) { showRequestError(error) }
+}
+
+const fetchInspectors = async () => {
+  try {
+    const response = await postAdmin('/api/admin/users/list')
+    const users = Array.isArray(response.data) ? response.data : []
+    inspectorOptions.value = users.filter((item) => item.role !== 'admin')
+  } catch (error) {
+    showRequestError(error)
+  }
+}
+
+const openAssignModal = async (item) => {
+  assigningEnterprise.value = item
+  selectedInspectorIds.value = []
+  showAssignModal.value = true
+  await fetchInspectors()
+  try {
+    const response = await postAdmin('/api/admin/enterprises/assignments/list', { enterprise_id: item.id })
+    const rows = Array.isArray(response.data) ? response.data : []
+    selectedInspectorIds.value = rows.filter((row) => row.status === 'active').map((row) => Number(row.inspector_id))
+  } catch (error) {
+    showRequestError(error)
+  }
+}
+
+const closeAssignModal = () => {
+  showAssignModal.value = false
+  assigningEnterprise.value = null
+  selectedInspectorIds.value = []
+}
+
+const toggleInspector = (id) => {
+  const target = Number(id)
+  const exists = selectedInspectorIds.value.includes(target)
+  selectedInspectorIds.value = exists ? selectedInspectorIds.value.filter((item) => item !== target) : [...selectedInspectorIds.value, target]
+}
+
+const saveAssignments = async () => {
+  if (!assigningEnterprise.value?.id) return
+  try {
+    await postAdmin('/api/admin/enterprises/assignments/save', {
+      enterprise_id: assigningEnterprise.value.id,
+      inspector_ids: selectedInspectorIds.value,
+    })
+    closeAssignModal()
+    await fetchEnterpriseQuery()
+    uni.showToast({ title: '检查员分配已保存', icon: 'success' })
   } catch (error) {
     showRequestError(error)
   }
@@ -486,20 +675,31 @@ const downloadReport = async (report, format) => {
 </script>
 
 <style scoped>
-.page-heading { margin-bottom: 22px; display: flex; align-items: center; justify-content: space-between; }.heading-title { display: block; color: #172541; font-size: 28px; font-weight: 700; }.heading-desc { display: block; margin-top: 6px; color: #8b98aa; font-size: 14px; }.export-btn,.clear-btn { height: 40px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; }.export-btn { background: #18a66c; color: #fff; }.clear-btn { background: #f1f4f8; color: #69778c; }
+.assign-link { color: #155ec5; cursor: pointer; }
+.assign-panel { max-width: 680px; }
+.assign-body { max-height: 520px; }
+.assign-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }
+.assign-row.active { background: #e7f0ff; border-color: #c8dcff; }
+.assign-avatar { width: 34px; height: 34px; border-radius: 8px; background: #202123; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.assign-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.assign-name { color: #202123; font-weight: 700; font-size: 14px; }
+.assign-meta { color: #8a919c; font-size: 12px; }
+.assign-check { color: #155ec5; font-size: 13px; }
+
+.page-heading { margin-bottom: 22px; display: flex; align-items: center; justify-content: space-between; }.heading-actions { display: flex; gap: 10px; align-items: center; }.heading-title { display: block; color: #172541; font-size: 28px; font-weight: 700; }.heading-desc { display: block; margin-top: 6px; color: #8b98aa; font-size: 14px; }.create-btn,.export-btn,.clear-btn { height: 40px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; }.create-btn { background: #1677ff; color: #fff; }.export-btn { background: #18a66c; color: #fff; }.clear-btn { background: #f1f4f8; color: #69778c; }
 .summary-grid { margin-bottom: 18px; display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }.summary-card { padding: 17px 19px; display: flex; flex-direction: column; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.summary-value { color: #1677ff; font-size: 24px; font-weight: 700; }.summary-value.orange { color: #ff922b; }.summary-value.red { color: #f05252; }.summary-value.green { color: #18a66c; }.summary-label { margin-top: 5px; color: #8b98aa; font-size: 11px; }
 .filter-panel { padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.filter-input,.filter-picker { height: 40px; padding: 0 12px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f9fbfd; box-sizing: border-box; font-size: 12px; }.keyword-input { flex: 1; min-width: 300px; }.date-input { width: 190px; }.filter-picker { min-width: 130px; display: flex; align-items: center; color: #59677d; }
 .category-panel { margin-top: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 16px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.category-mode { display: flex; flex-shrink: 0; gap: 5px; }.category-mode text,.category-list text { padding: 6px 10px; border-radius: 20px; color: #7c899b; font-size: 11px; }.category-mode text.active,.category-list text.active { background: #eaf3ff; color: #1677ff; }.category-scroll { flex: 1; white-space: nowrap; }.category-list { display: inline-flex; gap: 6px; }
 .result-toolbar { margin: 14px 0; display: flex; align-items: center; justify-content: space-between; color: #8b98aa; font-size: 12px; }.sort-group { display: flex; gap: 8px; }.sort-item { padding: 6px 11px; border-radius: 20px; background: #fff; color: #69778c; }.sort-item.active { background: #eaf3ff; color: #1677ff; }
-.enterprise-card { margin-bottom: 13px; padding: 18px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.enterprise-head { display: flex; justify-content: space-between; align-items: center; }.enterprise-main { min-width: 0; }.name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.enterprise-name { color: #24334e; font-size: 15px; font-weight: 700; }.status-tag,.inspection-tag,.risk-tag { padding: 3px 8px; border-radius: 20px; font-size: 10px; }.status-tag { background: #eaf8f1; color: #18a66c; }.status-tag.archived { background: #f1f3f6; color: #8995a7; }.inspection-tag { background: #eaf3ff; color: #1677ff; }.risk-tag { background: #fff6e6; color: #e78a00; }.risk-tag.high { background: #fff0f1; color: #e84d56; }.enterprise-meta,.enterprise-address { display: block; margin-top: 5px; color: #96a2b3; font-size: 11px; }.head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }.edit-link,.expand-link,.download-link { color: #1677ff; font-size: 12px; }.edit-link { color: #18a66c; }
+.enterprise-card { margin-bottom: 13px; padding: 18px; background: #fff; border: 1px solid #edf1f7; border-radius: 14px; }.enterprise-head { display: flex; justify-content: space-between; align-items: center; }.enterprise-main { min-width: 0; }.name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.enterprise-name { color: #24334e; font-size: 15px; font-weight: 700; }.status-tag,.inspection-tag,.risk-tag { padding: 3px 8px; border-radius: 20px; font-size: 10px; }.status-tag { background: #eaf8f1; color: #18a66c; }.status-tag.archived { background: #f1f3f6; color: #8995a7; }.inspection-tag { background: #eaf3ff; color: #1677ff; }.risk-tag { background: #fff6e6; color: #e78a00; }.risk-tag.high { background: #fff0f1; color: #e84d56; }.enterprise-meta,.enterprise-address { display: block; margin-top: 5px; color: #96a2b3; font-size: 11px; }.head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }.edit-link,.expand-link,.download-link,.archive-link,.restore-link { color: #1677ff; font-size: 12px; }.edit-link { color: #18a66c; }.archive-link { color: #f05252; }.restore-link { color: #18a66c; }
 .metric-grid { margin-top: 16px; padding: 13px 0; display: grid; grid-template-columns: repeat(6,1fr); border-top: 1px solid #edf1f7; }.metric-grid>view { display: flex; flex-direction: column; }.metric-value { color: #263651; font-size: 18px; font-weight: 700; }.danger-value { color: #f05252; }.success-value { color: #18a66c; }.metric-label { margin-top: 3px; color: #9aa6b7; font-size: 10px; }
 .detail-panel { padding-top: 2px; border-top: 1px solid #edf1f7; }.detail-section { padding: 16px 0; border-bottom: 1px solid #edf1f7; }.detail-section:last-child { border-bottom: 0; padding-bottom: 0; }.section-title { color: #31405a; font-size: 13px; font-weight: 700; }.section-heading { display: flex; justify-content: space-between; }.rate-text { color: #18a66c; font-size: 11px; }.detail-grid { margin-top: 11px; display: grid; grid-template-columns: repeat(2,1fr); gap: 9px 24px; color: #526078; font-size: 11px; }.detail-grid>view { display: flex; }.detail-grid .full-row { grid-column: 1 / -1; }.detail-label { width: 78px; flex-shrink: 0; color: #9aa6b7; }
-.progress-track { height: 7px; margin-top: 11px; overflow: hidden; border-radius: 10px; background: #edf1f7; }.progress-value { height: 100%; border-radius: 10px; background: linear-gradient(90deg,#24bf7a,#54d99b); }.hazard-tags { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; }.hazard-tags text { padding: 5px 9px; border-radius: 20px; background: #fff4e8; color: #d77b16; font-size: 10px; }.report-row { padding: 11px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-top: 1px solid #f0f3f7; }.report-info { min-width: 0; display: flex; flex-direction: column; }.report-name { color: #526078; font-size: 11px; }.report-date,.no-report { margin-top: 3px; color: #a1adbc; font-size: 10px; }.report-ref-count { margin-top: 5px; color: #69778c; font-size: 10px; }.report-ref-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }.report-ref-item { color: #6d7b90; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }.download-link { margin-left: 13px; }.empty-card { padding: 70px; background: #fff; border: 1px dashed #dce5f0; border-radius: 14px; color: #9aa6b6; text-align: center; }
+.progress-track { height: 7px; margin-top: 11px; overflow: hidden; border-radius: 10px; background: #edf1f7; }.progress-value { height: 100%; border-radius: 10px; background: linear-gradient(90deg,#24bf7a,#54d99b); }.hazard-tags { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; }.hazard-tags text { padding: 5px 9px; border-radius: 20px; background: #fff4e8; color: #d77b16; font-size: 10px; }.inspection-task-row,.report-row { padding: 11px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-top: 1px solid #f0f3f7; }.report-info { min-width: 0; display: flex; flex-direction: column; }.report-name { color: #526078; font-size: 11px; }.report-date,.no-report { margin-top: 3px; color: #a1adbc; font-size: 10px; }.report-ref-count { margin-top: 5px; color: #69778c; font-size: 10px; }.report-ref-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }.report-ref-item { color: #6d7b90; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }.download-link { margin-left: 13px; }.empty-card { padding: 70px; background: #fff; border: 1px dashed #dce5f0; border-radius: 14px; color: #9aa6b6; text-align: center; }
 .archive-grid { margin-top: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.archive-grid>view { padding: 11px; border-radius: 9px; background: #f8fafe; }.archive-title,.archive-item { display: block; }.archive-title { margin-bottom: 7px; color: #526078; font-size: 11px; font-weight: 700; }.archive-item { margin-top: 4px; color: #8491a4; font-size: 10px; }
-.modal-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 5000; padding: 24px; display: flex; align-items: center; justify-content: center; background: rgba(15,28,50,.46); box-sizing: border-box; }.modal-panel { width: 760px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 18px; }.modal-header { padding: 22px 26px; display: flex; justify-content: space-between; border-bottom: 1px solid #edf1f7; }.modal-title { display: block; color: #172541; font-size: 21px; font-weight: 700; }.modal-desc { display: block; margin-top: 5px; color: #909daf; font-size: 13px; }.modal-close { color: #91a0b5; font-size: 26px; }.modal-body { flex: 1; max-height: 66vh; padding: 24px 26px; box-sizing: border-box; }.modal-footer { padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #edf1f7; }.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.form-item.full { grid-column: 1 / -1; }.form-label { display: block; margin-bottom: 7px; color: #536179; font-size: 12px; font-weight: 600; }.form-input,.form-picker,.form-textarea { width: 100%; padding: 0 12px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f9fbfd; box-sizing: border-box; font-size: 12px; }.form-input,.form-picker { height: 40px; }.form-picker { display: flex; align-items: center; }.form-textarea { height: 80px; padding-top: 11px; }.cancel-btn,.save-btn { height: 38px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 12px; }.cancel-btn { background: #f1f4f8; color: #69778c; }.save-btn { background: #1677ff; color: #fff; }
+.modal-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 5000; padding: 24px; display: flex; align-items: center; justify-content: center; background: rgba(15,28,50,.46); box-sizing: border-box; }.modal-panel { width: 760px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 18px; }.modal-header { padding: 22px 26px; display: flex; justify-content: space-between; border-bottom: 1px solid #edf1f7; }.modal-title { display: block; color: #172541; font-size: 21px; font-weight: 700; }.modal-desc { display: block; margin-top: 5px; color: #909daf; font-size: 13px; }.modal-close { color: #91a0b5; font-size: 26px; }.modal-body { flex: 1; max-height: 66vh; padding: 24px 26px; box-sizing: border-box; }.modal-footer { padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #edf1f7; }.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.form-item.full { grid-column: 1 / -1; }.form-label { display: block; margin-bottom: 7px; color: #536179; font-size: 12px; font-weight: 600; }.form-input,.form-picker,.form-textarea { width: 100%; padding: 0 12px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f9fbfd; box-sizing: border-box; font-size: 12px; }.form-input,.form-picker { height: 40px; }.form-picker { display: flex; align-items: center; }.form-textarea { height: 80px; padding-top: 11px; }.cancel-btn,.save-btn { height: 38px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 12px; }.cancel-btn { background: #f1f4f8; color: #69778c; }.save-btn { background: #1677ff; color: #fff; }.save-btn.disabled { opacity: .6; pointer-events: none; }.form-error { margin-right: auto; color: #f05252; font-size: 12px; align-self: center; }
 .custom-selector { position: relative; z-index: 20; }.custom-selector.expanded { z-index: 200; }.filter-status-selector { z-index: 30; }.selector-options { position: absolute; top: calc(100% + 6px); right: 0; left: 0; z-index: 100; padding: 6px 0; overflow: hidden; border: 1px solid #e2e9f2; border-radius: 9px; background: #fff; box-shadow: 0 10px 24px rgba(15,28,50,.16); }.filter-selector-options { min-width: 180px; }.selector-option { padding: 11px 13px; color: #536179; font-size: 12px; white-space: nowrap; }.selector-option.active { background: #eaf3ff; color: #1677ff; font-weight: 600; }
 @media screen and (max-width:900px) {
-  .page-heading { margin-bottom: 20rpx; }.heading-copy { display: none; }.export-btn,.clear-btn { height: 70rpx; padding: 0 22rpx; border-radius: 13rpx; font-size: 23rpx; }
+  .page-heading { margin-bottom: 20rpx; }.heading-copy { display: none; }.create-btn,.export-btn,.clear-btn { height: 70rpx; padding: 0 22rpx; border-radius: 13rpx; font-size: 23rpx; }
   .summary-grid { grid-template-columns: repeat(2,1fr); gap: 12rpx; }.summary-card { padding: 20rpx; border-radius: 18rpx; }.summary-value { font-size: 34rpx; }.summary-label { font-size: 20rpx; }
   .filter-panel { padding: 18rpx; gap: 12rpx; border-radius: 19rpx; }.filter-input,.filter-picker { height: 70rpx; padding: 0 18rpx; border-radius: 13rpx; font-size: 22rpx; }.keyword-input { width: 100%; min-width: 0; flex-basis: 100%; }.date-input { flex: 1; width: auto; }.filter-picker { min-width: 220rpx; flex: 1; }.result-toolbar { font-size: 20rpx; }.sort-group { gap: 6rpx; }.sort-item { padding: 9rpx 12rpx; }
   .category-panel { margin-top: 14rpx; padding: 16rpx; display: block; border-radius: 19rpx; }.category-mode { margin-bottom: 12rpx; }.category-mode text,.category-list text { padding: 10rpx 16rpx; font-size: 20rpx; }

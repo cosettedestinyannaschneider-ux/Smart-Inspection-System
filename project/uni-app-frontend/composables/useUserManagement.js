@@ -16,7 +16,6 @@ export const statusFilters = [
 
 /** 功能权限配置 */
 export const permOptions = [
-  { key: 'enterprise:manage', label: '企业信息管理', description: '录入、编辑和维护企业资料' },
   { key: 'image:manage', label: '隐患图片管理', description: '上传、查看、删除和标注图片' },
   { key: 'analysis:run', label: 'AI 智能分析', description: '提交隐患并查看智能分析结果' },
   { key: 'report:download', label: '报告生成下载', description: '生成并下载 Word、PDF 报告' },
@@ -57,6 +56,7 @@ export const useUserListPresentation = ({ userList, keyword, activeRole, activeS
       const statusMatched = activeStatus.value === 'all' || item.status === activeStatus.value
       const textMatched = !searchText
         || item.username.toLowerCase().includes(searchText)
+        || (item.assigned_enterprise_names || '').toLowerCase().includes(searchText)
         || (item.enterprise_name || '').toLowerCase().includes(searchText)
         || (item.department_name || '').toLowerCase().includes(searchText)
       return roleMatched && statusMatched && textMatched

@@ -1050,3 +1050,47 @@ Authorization: Bearer <access_token>
 - 本次整理未改变任何接口路径、请求参数、返回结构或错误语义。
 - 前端 `pages/admin/users.vue` 继续调用相同阶段 B 接口，仅将请求封装移至公共 API 模块。
 - **阶段 B 模块化整理无 DDL 变更。**
+
+## PR21：客户企业与检查任务归档接口
+
+### 21.1 搜索被检查客户企业
+- **URL**: `POST /api/client-enterprises/search`
+- **权限**: 登录用户，需 `enterprise:manage`
+- **参数**: `keyword`、`limit`
+- **说明**: 用于检查员创建检查任务前选择已有客户企业。
+
+### 21.2 新建或更新被检查客户企业
+- **URL**: `POST /api/client-enterprises/upsert`
+- **权限**: 登录用户，需 `enterprise:manage`
+- **关键参数**: `id`、`name`、`region`、`address`、`contact`、`phone`、`industry`、`project_name`
+- **说明**: `id` 为空时新建客户企业，存在时更新客户企业档案。
+
+### 21.3 创建检查任务
+- **URL**: `POST /api/inspection-tasks/start`
+- **权限**: 登录用户，需 `image:manage`
+- **关键参数**: `enterprise_id`、`inspection_date`、`location`、`requirement`、`remark`
+- **说明**: 一个检查任务只绑定一个被检查客户企业和一个检查员。
+
+### 21.4 检查任务列表
+- **URL**: `POST /api/inspection-tasks/list`
+- **权限**: 登录用户
+- **参数**: `enterprise_id`、`status`、`keyword`、`date_from`、`date_to`、`limit`
+- **说明**: 管理员可查看全部任务，普通检查员仅查看自己的任务。
+
+### 21.5 检查任务详情
+- **URL**: `POST /api/inspection-tasks/detail`
+- **权限**: 登录用户
+- **参数**: `inspection_task_id` 或 `id`
+- **返回**: 任务、客户企业、任务图片、任务报告。
+
+### 21.6 完成检查任务
+- **URL**: `POST /api/inspection-tasks/complete`
+- **权限**: 登录用户，需 `image:manage`
+- **参数**: `inspection_task_id` 或 `id`
+- **说明**: 完成后该任务不能继续上传图片或发起正式分析。
+
+### 21.7 图片上传和 AI 分析任务绑定
+- `POST /api/hazard/images/upload` 新增必填 `inspection_task_id`。
+- `GET /api/hazard/images/list` 支持 `inspection_task_id` 查询参数。
+- `POST /api/hazard/analyze` 新增必填 `inspection_task_id`。
+- 后端会校验所选图片必须属于同一个检查任务和同一个客户企业，避免跨企业、跨任务混选。

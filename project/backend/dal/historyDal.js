@@ -18,10 +18,10 @@ const historyDal = {
   async createHistory(userId, prompt, result, wordPath, pdfPath, imagePath = null, sessionId = null, opts = {}) {
     const [res] = await db.execute(
       `INSERT INTO inspection_reports
-       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, title, review_status, review_required, report_allowed, report_block_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, inspection_task_id, title, review_status, review_required, report_allowed, report_block_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, prompt, result, wordPath, pdfPath, imagePath, sessionId,
-       opts.enterpriseId || null, opts.title || null,
+       opts.enterpriseId || null, opts.inspectionTaskId || null, opts.title || null,
        opts.reviewStatus || C.REPORT_REVIEW_PENDING, opts.reviewRequired ? 1 : 0,
        opts.reportAllowed === false ? 0 : 1, opts.reportBlockReason || null]
     )
@@ -36,23 +36,43 @@ const historyDal = {
     return rows
   },
 
+  /** 按检查任务查询报告，普通用户只能查看自己的任务报告 */
+  async findByTaskId(inspectionTaskId, userId, isAdmin = false) {
+    const params = [inspectionTaskId]
+    let sql = 'SELECT * FROM inspection_reports WHERE inspection_task_id = ?'
+    if (!isAdmin) {
+      sql += ' AND user_id = ?'
+      params.push(userId)
+    }
+    sql += ' ORDER BY created_at DESC'
+    const [rows] = await db.execute(sql, params)
+    return rows
+  },
+
   async findById(id) {
     const [rows] = await db.execute('SELECT * FROM inspection_reports WHERE id = ?', [id])
     return rows[0]
   },
 
-  async findSessionsByUserId(userId) {
+  async findSessionsByUserId(userId, filters = {}) {
+    const params = [userId]
+    let where = "s.user_id = ? AND s.status = 'active'"
+    if (filters.inspectionTaskId) {
+      where += ' AND s.inspection_task_id = ?'
+      params.push(filters.inspectionTaskId)
+    }
     const [rows] = await db.execute(`
       SELECT
         s.id AS session_id,
+        s.inspection_task_id,
         COALESCE(NULLIF(MAX(ir.prompt), ''), NULLIF(MAX(s.title), ''), '新对话') AS title,
         MAX(ir.created_at) AS created_at
       FROM sessions s
       LEFT JOIN inspection_reports ir ON ir.session_id = s.id AND ir.user_id = s.user_id
-      WHERE s.user_id = ? AND s.status = 'active'
-      GROUP BY s.id
-      ORDER BY created_at DESC, s.updated_at DESC
-    `, [userId])
+      WHERE ${where}
+      GROUP BY s.id, s.inspection_task_id
+      ORDER BY COALESCE(MAX(ir.created_at), s.updated_at) DESC, s.updated_at DESC
+    `, params)
     return rows
   },
 
@@ -64,11 +84,15 @@ const historyDal = {
     return rows
   },
 
-  async findBySessionIdForUser(sessionId, userId) {
-    const [rows] = await db.execute(
-      'SELECT * FROM inspection_reports WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC',
-      [sessionId, userId]
-    )
+  async findBySessionIdForUser(sessionId, userId, filters = {}) {
+    const params = [sessionId, userId]
+    let sql = 'SELECT * FROM inspection_reports WHERE session_id = ? AND user_id = ?'
+    if (filters.inspectionTaskId) {
+      sql += ' AND inspection_task_id = ?'
+      params.push(filters.inspectionTaskId)
+    }
+    sql += ' ORDER BY created_at ASC'
+    const [rows] = await db.execute(sql, params)
     return rows
   },
 

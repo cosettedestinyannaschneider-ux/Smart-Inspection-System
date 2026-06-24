@@ -44,17 +44,22 @@ const organizationService = {
     await logDal.logAction(adminId, C.ACTION_ADMIN_UPDATE_ENTERPRISE, { id: enterpriseId, name: enterpriseName }, ipAddress)
   },
 
-  /** 删除无任何组织或业务关联的企业 */
+  /** 企业归档与恢复 */
   async deleteEnterprise(adminId, id, ipAddress = null) {
     const enterpriseId = Number(id)
-    if (!enterpriseId || !await enterpriseDal.findById(enterpriseId)) throw businessError('企业不存在')
-    const references = await enterpriseDal.countDeleteReferences(enterpriseId)
-    if (references.departments > 0) throw businessError('企业下存在部门，禁止删除')
-    if (references.hazard_images > 0 || references.inspection_reports > 0) {
-      throw businessError('企业存在隐患图片或排查报告，禁止删除')
-    }
-    await enterpriseDal.deleteById(enterpriseId)
-    await logDal.logAction(adminId, C.ACTION_ADMIN_DELETE_ENTERPRISE, { id: enterpriseId }, ipAddress)
+    const enterprise = enterpriseId ? await enterpriseDal.findById(enterpriseId) : null
+    if (!enterprise) throw businessError('企业不存在')
+    await enterpriseDal.archiveById(enterpriseId)
+    await logDal.logAction(adminId, C.ACTION_ADMIN_DELETE_ENTERPRISE, { id: enterpriseId, mode: 'archive' }, ipAddress)
+  },
+
+  /** 企业归档与恢复 */
+  async restoreEnterprise(adminId, id, ipAddress = null) {
+    const enterpriseId = Number(id)
+    const enterprise = enterpriseId ? await enterpriseDal.findById(enterpriseId) : null
+    if (!enterprise) throw businessError('企业不存在')
+    await enterpriseDal.restoreById(enterpriseId)
+    await logDal.logAction(adminId, C.ACTION_ADMIN_UPDATE_ENTERPRISE, { id: enterpriseId, mode: 'restore' }, ipAddress)
   },
 
   /** 查询部门列表 */

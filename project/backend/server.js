@@ -29,6 +29,8 @@ const aiModelConfigDal = require('./dal/aiModelConfigDal')
 const inspectionReportImageDal = require('./dal/inspectionReportImageDal')
 const inspectionReportKnowledgeRefDal = require('./dal/inspectionReportKnowledgeRefDal')
 const inspectionReportRuleRefDal = require('./dal/inspectionReportRuleRefDal')
+const inspectionTaskDal = require('./dal/inspectionTaskDal')
+const enterpriseAssignmentDal = require('./dal/enterpriseAssignmentDal')
 
 // ---- 公共模块 ----
 const { responseMiddleware } = require('./common/Result')
@@ -42,6 +44,7 @@ const {
 const adminAuth = require('./middleware/adminAuth')
 const requireAuth = require('./middleware/requireAuth')
 const requirePermission = require('./middleware/requirePermission')
+const requireAdmin = require('./middleware/requireAdmin')
 const adminUserRoutes = require('./routes/admin/userRoutes')
 const adminEnterpriseRoutes = require('./routes/admin/enterpriseRoutes')
 const adminDepartmentRoutes = require('./routes/admin/departmentRoutes')
@@ -209,6 +212,16 @@ if (process.env.NODE_ENV !== 'test') {
 
 /** 统一读取当前登录用户 ID */
 const getAuthUserId = (req) => Number(req.auth?.userId || 0)
+
+/** 判断当前请求是否管理员 */
+const isAdminRequest = (req) => req.auth?.user?.role === C.ROLE_ADMIN
+
+/** 读取并校验当前用户可访问的检查任务 */
+const loadAccessibleInspectionTask = async (req, inspectionTaskId) => {
+  const taskId = Number(inspectionTaskId || 0)
+  if (!taskId) return null
+  return inspectionTaskDal.findAccessibleById(taskId, getAuthUserId(req), isAdminRequest(req))
+}
 
 /** 统一生成报告下载链接 */
 const buildReportDownloadUrls = (req, reportId, wordPath, pdfPath) => ({
@@ -539,31 +552,155 @@ app.get('/api/departments/list', requireAuth, async (req, res) => {
 // =========================================================================
 // 隐患排查图片（9.5 模块）
 // =========================================================================
+// =========================================================================
+// 客户企业与检查任务（PR21：检查员归档模型）
+// =========================================================================
+app.post('/api/client-enterprises/search', requireAuth, async (req, res) => {
+  try {
+    const userId = getAuthUserId(req)
+    const list = isAdminRequest(req)
+      ? await enterpriseDal.searchClients(req.body.keyword || '', req.body.limit || 100)
+      : await enterpriseAssignmentDal.listAssignedEnterprises(userId, req.body.keyword || '', req.body.limit || 100)
+    res.success(list)
+  } catch (err) {
+    console.error('[Server] client enterprise search error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+app.post('/api/client-enterprises/upsert', requireAuth, requireAdmin, async (req, res) => {
+  const name = String(req.body.name || '').trim()
+  if (!name) return res.fail(ErrorCode.PARAM_MISSING, '请输入被检查客户企业名称')
+  try {
+    const enterprise = await enterpriseDal.upsertClient(req.body)
+    await logDal.logAction(getAuthUserId(req), C.ACTION_UPDATE_ENTERPRISE, { enterprise_id: enterprise.id, name: enterprise.name }, req.ip)
+    res.success(enterprise)
+  } catch (err) {
+    console.error('[Server] client enterprise upsert error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.post('/api/inspection-tasks/start', requireAuth, requirePermission('image:manage'), async (req, res) => {
+  const enterpriseId = Number(req.body.enterprise_id)
+  if (!enterpriseId) return res.fail(ErrorCode.PARAM_MISSING, '请先选择被检查客户企业')
+  try {
+    const enterprise = await enterpriseDal.findById(enterpriseId)
+    if (!enterprise || enterprise.status === C.STATUS_ARCHIVED) return res.fail(ErrorCode.RECORD_NOT_FOUND, '被检查客户企业不存在')
+    if (!isAdminRequest(req) && !await enterpriseAssignmentDal.canAccessEnterprise(getAuthUserId(req), enterpriseId)) {
+      return res.fail(ErrorCode.PERMISSION_DENIED, '当前检查员未分配该客户企业')
+    }
+    const task = await inspectionTaskDal.create({
+      enterpriseId,
+      inspectorId: getAuthUserId(req),
+      inspectionDate: req.body.inspection_date,
+      location: req.body.location,
+      requirement: req.body.requirement,
+      remark: req.body.remark,
+    })
+    await logDal.logAction(getAuthUserId(req), 'CREATE_INSPECTION_TASK', { task_id: task.id, enterprise_id: enterpriseId }, req.ip)
+    res.success(task)
+  } catch (err) {
+    console.error('[Server] inspection task start error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR, err.message)
+  }
+})
+
+app.post('/api/inspection-tasks/list', requireAuth, async (req, res) => {
+  try {
+    const list = await inspectionTaskDal.list({
+      userId: getAuthUserId(req),
+      isAdmin: isAdminRequest(req),
+      enterpriseId: req.body.enterprise_id ? Number(req.body.enterprise_id) : null,
+      status: req.body.status || null,
+      keyword: req.body.keyword || '',
+      dateFrom: req.body.date_from || null,
+      dateTo: req.body.date_to || null,
+      limit: req.body.limit || 50,
+      includeArchived: !!req.body.include_archived,
+    })
+    res.success(list)
+  } catch (err) {
+    console.error('[Server] inspection task list error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+app.post('/api/inspection-tasks/detail', requireAuth, async (req, res) => {
+  const taskId = Number(req.body.id || req.body.inspection_task_id)
+  if (!taskId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const task = await loadAccessibleInspectionTask(req, taskId)
+    if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+    const images = await hazardImageDal.listByTaskId(taskId)
+    const reports = await historyDal.findByTaskId(taskId, getAuthUserId(req), isAdminRequest(req))
+    res.success({
+      task,
+      enterprise: await enterpriseDal.findById(task.enterprise_id),
+      images: images.map((img) => ({ ...img, file_path: buildHazardImagePreviewUrl(req, img.id) })),
+      reports: await mapHistoryRecordsForClient(req, reports),
+    })
+  } catch (err) {
+    console.error('[Server] inspection task detail error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+})
+
+const updateInspectionTaskArchiveStatus = async (req, res, archived) => {
+  const taskId = Number(req.body.id || req.body.inspection_task_id)
+  if (!taskId) return res.fail(ErrorCode.PARAM_MISSING)
+  try {
+    const ok = archived
+      ? await inspectionTaskDal.archive(taskId, getAuthUserId(req), isAdminRequest(req))
+      : await inspectionTaskDal.restore(taskId, getAuthUserId(req), isAdminRequest(req))
+    if (!ok) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权操作')
+    await logDal.logAction(getAuthUserId(req), archived ? 'ARCHIVE_INSPECTION_TASK' : 'RESTORE_INSPECTION_TASK', { task_id: taskId }, req.ip)
+    res.success(null, archived ? '检查任务已归档' : '检查任务已恢复')
+  } catch (err) {
+    console.error('[Server] inspection task archive error:', err)
+    res.fail(ErrorCode.INTERNAL_ERROR)
+  }
+}
+
+app.post('/api/inspection-tasks/archive', requireAuth, requirePermission('image:manage'), async (req, res) => updateInspectionTaskArchiveStatus(req, res, true))
+app.post('/api/inspection-tasks/restore', requireAuth, requirePermission('image:manage'), async (req, res) => updateInspectionTaskArchiveStatus(req, res, false))
+app.post('/api/inspection-tasks/complete', requireAuth, requirePermission('image:manage'), async (req, res) => updateInspectionTaskArchiveStatus(req, res, true))
+
 app.post('/api/hazard/images/upload', requireAuth, requirePermission('image:manage'), hazardUpload.array('files', C.MAX_UPLOAD_FILES), async (req, res) => {
   const userId = getAuthUserId(req)
   const files = Array.isArray(req.files) ? req.files : []
+  const inspectionTaskId = Number(req.body.inspection_task_id)
   if (!files.length) return res.fail(ErrorCode.FILE_REQUIRED, '请上传图片文件')
-  const enterpriseId = req.body.enterprise_id ? Number(req.body.enterprise_id) : null
+  if (!inspectionTaskId) return res.fail(ErrorCode.PARAM_MISSING, '请先选择或创建检查任务')
   try {
+    const task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+    if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+    if (task.status === 'archived') return res.fail(ErrorCode.PERMISSION_DENIED, '检查任务已归档，只能查看历史记录，恢复后才能继续上传图片')
     const payload = files.map((f) => ({
       filePath: path.posix.join(C.HAZARD_UPLOAD_SUBDIR, path.basename(f.path)),
       originalName: f.originalname,
       fileSize: f.size,
-      enterpriseId,
+      enterpriseId: task.enterprise_id,
+      inspectionTaskId: task.id,
     }))
     const created = await hazardImageDal.createMany(userId, payload)
-    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_UPLOAD, { count: created.length }, req.ip)
+    await logDal.logAction(userId, C.ACTION_HAZARD_IMAGE_UPLOAD, { count: created.length, inspection_task_id: task.id, enterprise_id: task.enterprise_id }, req.ip)
     res.success(created)
   } catch (err) {
     console.error('[Server] hazard image upload error:', err)
-    res.fail(ErrorCode.IMAGE_PROCESS_FAILED)
+    res.fail(ErrorCode.IMAGE_PROCESS_FAILED, err.message)
   }
 })
 
 app.get('/api/hazard/images/list', requireAuth, requirePermission('image:manage'), async (req, res) => {
   const userId = getAuthUserId(req)
+  const inspectionTaskId = req.query.inspection_task_id ? Number(req.query.inspection_task_id) : null
   try {
-    const list = await hazardImageDal.listByUserId(userId)
+    if (inspectionTaskId) {
+      const task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+      if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+    }
+    const list = await hazardImageDal.listByUserId(userId, { inspectionTaskId })
     const result = list.map((img) => ({
       ...img,
       file_path: buildHazardImagePreviewUrl(req, img.id),
@@ -618,17 +755,31 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
   const imageIds = Array.isArray(req.body.image_ids)
     ? req.body.image_ids
     : String(req.body.image_ids || '').split(',').filter(Boolean)
-  const enterpriseId = req.body.enterprise_id ? Number(req.body.enterprise_id) : null
+  const inspectionTaskId = Number(req.body.inspection_task_id)
   const modelId = req.body.model_id ? Number(req.body.model_id) : null
 
+  if (sessionId) {
+    const existingSession = await sessionDal.findById(sessionId).catch(() => null)
+    if (existingSession && existingSession.inspection_task_id && Number(existingSession.inspection_task_id) !== Number(inspectionTaskId)) {
+      return res.fail(ErrorCode.PERMISSION_DENIED, '当前会话不属于所选检查任务')
+    }
+  }
+
+  if (!inspectionTaskId) return res.fail(ErrorCode.PARAM_MISSING, '请先选择或创建检查任务')
   if (!imageIds.length) return res.fail(ErrorCode.PARAM_MISSING, '请至少选择 1 张隐患照片')
 
   try {
-    const enterprise = enterpriseId
-      ? await enterpriseDal.findById(enterpriseId)
-      : await enterpriseDal.findByUserOrganization(userId)
-    const images = await hazardImageDal.findByIds(userId, imageIds)
-    if (!images.length) return res.fail(ErrorCode.IMAGE_NOT_FOUND)
+    const task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+    if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+    if (task.status === 'archived') return res.fail(ErrorCode.PERMISSION_DENIED, '检查任务已归档，只能查看历史记录，恢复后才能继续分析')
+    const enterprise = await enterpriseDal.findById(task.enterprise_id)
+    if (!enterprise) return res.fail(ErrorCode.RECORD_NOT_FOUND, '被检查客户企业不存在')
+
+    const images = await hazardImageDal.findByIds(userId, imageIds, { isAdmin: isAdminRequest(req) })
+    if (images.length !== imageIds.length) return res.fail(ErrorCode.IMAGE_NOT_FOUND, '部分图片不存在或无权访问')
+    const hasMixedTask = images.some((img) => Number(img.inspection_task_id) !== Number(task.id))
+    const hasMixedEnterprise = images.some((img) => Number(img.enterprise_id) !== Number(task.enterprise_id))
+    if (hasMixedTask || hasMixedEnterprise) return res.fail(ErrorCode.PARAM_INVALID, '所选图片必须属于同一个检查任务和客户企业')
 
     const aiImages = images.map((img) => ({
       id: Number(img.id),
@@ -638,9 +789,10 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     }))
 
     const { result, sessionId: newSessionId, knowledgeRefs = [] } = await aiService.processHazardImagesInspection({
-      prompt, sessionId, enterprise, images: aiImages, userId, modelId,
+      prompt, sessionId, enterprise, images: aiImages, userId, modelId, inspectionTask: task,
     })
-
+    // 图片分析创建的新会话必须绑定当前检查任务，否则切换任务后无法恢复对应对话记录。
+    if (newSessionId) await sessionDal.bindTask(newSessionId, task.id)
 
     const parsedAssessment = parseReportResult(result)
     const reviewState = buildReviewStateFromAssessment(parsedAssessment)
@@ -649,8 +801,9 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     // 分析阶段只保存 AI 初判和依据快照，正式 Word/PDF 必须人工确认后生成。
     const firstImagePath = images[0]?.file_path || null
     const historyId = await historyDal.createHistory(userId, prompt, result, null, null, firstImagePath, newSessionId, {
-      enterpriseId: enterpriseId || (enterprise ? enterprise.id : null),
-      title: enterprise ? enterprise.name + ' - 隐患排查报告' : null,
+      enterpriseId: task.enterprise_id,
+      inspectionTaskId: task.id,
+      title: enterprise.name + ' - ' + task.task_no + ' - 隐患排查报告',
       reviewStatus: reviewState.reviewStatus,
       reviewRequired: reviewState.reviewRequired,
       reportAllowed: reviewState.reportAllowed,
@@ -663,12 +816,17 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
     await logDal.logAction(userId, C.ACTION_AI_HAZARD_ANALYZE_MULTI, {
       count: images.length,
       knowledge_ref_count: knowledgeRefs.length,
+      inspection_task_id: task.id,
+      enterprise_id: task.enterprise_id,
     }, req.ip)
 
     res.success({
       result,
       sessionId: newSessionId,
       id: historyId,
+      inspection_task_id: task.id,
+      enterprise_id: task.enterprise_id,
+      task_no: task.task_no,
       knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
       report_allowed: reviewState.reportAllowed,
       report_block_reason: reviewState.reportBlockReason,
@@ -687,52 +845,98 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
 // =========================================================================
 // AI 巡检（旧接口，保持兼容）
 // =========================================================================
+
+
 app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.single('file'), async (req, res) => {
   const { prompt, session_id, isInspection, model_id } = req.body
   const filePath = req.file ? req.file.path : null
   const isInspectionFlag = isInspection === 'true' || isInspection === true || !!filePath
   const userId = getAuthUserId(req)
+  const inspectionTaskId = req.body.inspection_task_id ? Number(req.body.inspection_task_id) : null
 
   try {
     console.log(`[Server] Processing: prompt=${prompt}, sessionId=${session_id}, isInspection=${isInspectionFlag}`)
+    let task = null
+    let enterprise = null
+
+    // 检查员侧对话必须绑定检查任务，保证聊天记录、图片和报告不会串到其他企业。
+    if (!isAdminRequest(req)) {
+      if (!inspectionTaskId) return res.fail(ErrorCode.PARAM_MISSING, '请先选择检查任务后再发起对话')
+      task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+      if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+      if (task.status === 'archived') return res.fail(ErrorCode.PERMISSION_DENIED, '检查任务已归档，只能查看历史记录，恢复后才能继续对话')
+      enterprise = await enterpriseDal.findById(task.enterprise_id)
+      if (!enterprise) return res.fail(ErrorCode.RECORD_NOT_FOUND, '被检查客户企业不存在')
+    } else if (inspectionTaskId) {
+      task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+      if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+      enterprise = await enterpriseDal.findById(task.enterprise_id)
+    }
+
+    if (session_id) {
+      const existingSession = await sessionDal.findById(session_id).catch(() => null)
+      if (existingSession && inspectionTaskId && existingSession.inspection_task_id && Number(existingSession.inspection_task_id) !== Number(inspectionTaskId)) {
+        return res.fail(ErrorCode.PERMISSION_DENIED, '当前会话不属于所选检查任务')
+      }
+    }
+
     const modelId = model_id ? Number(model_id) : null
-    const { result, sessionId, businessScopeRefusal, knowledgeRefs = [] } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId)
+    const { result, sessionId, businessScopeRefusal, knowledgeRefs = [] } = await aiService.processAI(prompt, filePath, session_id, isInspectionFlag, modelId, userId, inspectionTaskId)
+    if (inspectionTaskId && sessionId) await sessionDal.bindTask(sessionId, inspectionTaskId)
     console.log(`[Server] AI result length: ${result ? result.length : 0}`)
 
     if (businessScopeRefusal) {
       const historyId = await historyDal.createHistory(userId, prompt, result, null, null, null, sessionId, {
-        title: '业务范围提示',
+        enterpriseId: enterprise?.id || null,
+        inspectionTaskId: task?.id || null,
+        title: task ? `${enterprise?.name || '客户企业'} - ${task.task_no} - 业务范围提示` : '业务范围提示',
+        reviewRequired: true,
+        reportAllowed: false,
+        reportBlockReason: '非安全生产业务范围内容，不生成正式报告。',
       })
-      await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, refused: true }, req.ip)
+      await logDal.logAction(userId, C.ACTION_AI_INSPECTION, { prompt, refused: true, inspection_task_id: task?.id || null }, req.ip)
       return res.success({
         result,
         sessionId,
         id: historyId,
         wordPath: null,
         pdfPath: null,
+        report_allowed: false,
+        report_block_reason: '非安全生产业务范围内容，不生成正式报告。',
       })
     }
 
-    const enterprise = await enterpriseDal.findByUserOrganization(userId)
-    const wordPath = await docService.generateWord(prompt, result, filePath, { enterprise })
-    const pdfPath = await docService.generatePDF(prompt, result, filePath, { enterprise, wordPath })
+    if (!enterprise) enterprise = await enterpriseDal.findByUserOrganization(userId)
+    const shouldGenerateLegacyReport = !inspectionTaskId
+    const wordPath = shouldGenerateLegacyReport ? await docService.generateWord(prompt, result, filePath, { enterprise }) : null
+    const pdfPath = shouldGenerateLegacyReport ? await docService.generatePDF(prompt, result, filePath, { enterprise, wordPath }) : null
 
     const historyId = await historyDal.createHistory(userId, prompt, result, wordPath, pdfPath, filePath, sessionId, {
       enterpriseId: enterprise ? enterprise.id : null,
-      title: enterprise ? `${enterprise.name} - 隐患排查报告` : null,
+      inspectionTaskId: task?.id || null,
+      title: task ? `${enterprise?.name || '客户企业'} - ${task.task_no} - 任务对话` : (enterprise ? `${enterprise.name} - 隐患排查报告` : null),
+      reviewRequired: !!inspectionTaskId,
+      reportAllowed: !inspectionTaskId,
+      reportBlockReason: inspectionTaskId ? '普通任务对话仅作为过程记录，不直接生成正式报告。请使用图片分析形成报告草稿。' : null,
     })
     await inspectionReportKnowledgeRefDal.replaceByReportId(historyId, knowledgeRefs)
     await logDal.logAction(userId, C.ACTION_AI_INSPECTION, {
       prompt,
       hasImage: !!filePath,
       knowledge_ref_count: knowledgeRefs.length,
+      inspection_task_id: task?.id || null,
+      enterprise_id: enterprise?.id || null,
     }, req.ip)
 
     res.success({
       result,
       sessionId,
       id: historyId,
+      inspection_task_id: task?.id || null,
+      enterprise_id: enterprise?.id || null,
       knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
+      report_allowed: !inspectionTaskId,
+      report_block_reason: inspectionTaskId ? '普通任务对话仅作为过程记录，不直接生成正式报告。请使用图片分析形成报告草稿。' : null,
       ...buildReportDownloadUrls(req, historyId, wordPath, pdfPath),
     })
   } catch (err) {
@@ -741,7 +945,6 @@ app.post('/api/process', requireAuth, requirePermission('analysis:run'), upload.
     res.fail(code, err.message)
   }
 })
-
 app.post('/api/clear-session', requireAuth, async (req, res) => {
   const sessionId = String(req.body.session_id || '').trim()
   if (!sessionId) return res.fail(ErrorCode.PARAM_MISSING)
@@ -756,7 +959,12 @@ app.post('/api/clear-session', requireAuth, async (req, res) => {
 // =========================================================================
 app.get('/api/sessions', requireAuth, async (req, res) => {
   try {
-    const sessions = await historyDal.findSessionsByUserId(getAuthUserId(req))
+    const inspectionTaskId = req.query.inspection_task_id ? Number(req.query.inspection_task_id) : null
+    if (inspectionTaskId) {
+      const task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+      if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+    }
+    const sessions = await historyDal.findSessionsByUserId(getAuthUserId(req), { inspectionTaskId })
     res.success(sessions)
   } catch (err) {
     res.fail(ErrorCode.DATABASE_ERROR)
@@ -765,7 +973,17 @@ app.get('/api/sessions', requireAuth, async (req, res) => {
 
 app.get('/api/session/:session_id', requireAuth, async (req, res) => {
   try {
-    const messages = await historyDal.findBySessionIdForUser(req.params.session_id, getAuthUserId(req))
+    const inspectionTaskId = req.query.inspection_task_id ? Number(req.query.inspection_task_id) : null
+    if (inspectionTaskId) {
+      const task = await loadAccessibleInspectionTask(req, inspectionTaskId)
+      if (!task) return res.fail(ErrorCode.RECORD_NOT_FOUND, '检查任务不存在或无权访问')
+      const session = await sessionDal.findById(req.params.session_id)
+      // 会话必须已经绑定当前任务；旧的未绑定会话不能被任意任务读取，避免无效记录跨任务串联。
+      if (!session || Number(session.user_id) !== Number(getAuthUserId(req)) || Number(session.inspection_task_id) !== Number(inspectionTaskId)) {
+        return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不属于当前检查任务')
+      }
+    }
+    const messages = await historyDal.findBySessionIdForUser(req.params.session_id, getAuthUserId(req), { inspectionTaskId })
     if (!messages.length) return res.fail(ErrorCode.RECORD_NOT_FOUND, '会话不存在')
     const result = await mapHistoryRecordsForClient(req, messages)
     res.success(result)
