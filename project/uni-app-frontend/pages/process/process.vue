@@ -29,7 +29,7 @@
 
       <view class="sidebar-footer">
         <view class="footer-btns">
-          <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="showEnterpriseModal = true">
+          <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="openEnterpriseModal">
             <text>客户企业</text>
           </view>
           <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="openHazardImageModal">
@@ -252,12 +252,12 @@
       <view class="input-container">
         <view v-if="user.role !== 'admin'" class="inspection-task-panel" :class="{ ready: currentInspectionTask }">
           <view class="task-panel-main">
-            <text class="task-panel-kicker">本次检查归档</text>
+            <text class="task-panel-kicker">本次检查归档（不同于左侧“开启新对话”）</text>
             <text class="task-panel-title">{{ currentEnterpriseName || '请先选择被检查客户企业' }}</text>
             <text class="task-panel-desc">{{ currentTaskSummary }}</text>
           </view>
           <view class="task-panel-actions">
-            <button class="task-tab-btn primary" @click="showEnterpriseModal = true">客户企业</button>
+            <button class="task-tab-btn primary" @click="openEnterpriseModal">客户企业</button>
             <button class="task-tab-btn dark" :disabled="!currentEnterpriseId || taskCreating" @click="startInspectionTask">{{ currentInspectionTask ? '新建任务' : '创建任务' }}</button>
             <button class="task-tab-btn" :disabled="!currentInspectionTask" @click="openHazardImageModal">图片记录</button>
             <button v-if="currentInspectionTask" class="task-tab-btn muted" @click="completeInspectionTask">完成任务</button>
@@ -329,6 +329,32 @@
 
         <!-- 表单主体：滚动区域 -->
         <scroll-view scroll-y class="form-body">
+          <view class="client-picker-section">
+            <view class="form-section-title compact">
+              <text>选择已保存企业</text>
+              <text>已有客户不会因为新建空白企业而丢失，可直接选择后创建本次检查任务</text>
+            </view>
+            <view class="client-search-row">
+              <input class="item-input client-search-input" v-model="clientEnterpriseKeyword" placeholder="输入企业名称、地区、联系人搜索" placeholder-class="placeholder" @confirm="searchClientEnterprises" />
+              <button class="client-search-btn" :disabled="clientEnterpriseLoading" @click="searchClientEnterprises">{{ clientEnterpriseLoading ? '搜索中' : '搜索' }}</button>
+            </view>
+            <view v-if="clientEnterpriseList.length" class="client-result-list">
+              <view
+                v-for="item in clientEnterpriseList"
+                :key="item.id"
+                class="client-result-item"
+                :class="{ active: Number(currentEnterpriseId) === Number(item.id) }"
+                @click="selectClientEnterprise(item)"
+              >
+                <view class="client-result-copy">
+                  <text class="client-result-name">{{ item.name }}</text>
+                  <text class="client-result-meta">{{ item.region || '地区未填' }} · {{ item.industry || '行业未填' }}</text>
+                </view>
+                <text class="client-result-action">{{ Number(currentEnterpriseId) === Number(item.id) ? '已选' : '选择' }}</text>
+              </view>
+            </view>
+            <text v-else class="client-empty-tip">未搜索到已保存企业时，可在下方填写档案并提交。</text>
+          </view>
           <view class="form-section">
             <view class="form-section-title">
               <text>基础档案</text>
@@ -571,6 +597,9 @@ const createEmptyEnterpriseForm = () => ({
   inspection_date: '',
 })
 const enterpriseForm = ref(createEmptyEnterpriseForm())
+const clientEnterpriseKeyword = ref('')
+const clientEnterpriseList = ref([])
+const clientEnterpriseLoading = ref(false)
 
 /** 将日期输入统一为 YYYY-MM-DD，兼容后端 DATE 字段 */
 const toDateOnly = (value) => {
@@ -622,7 +651,7 @@ const currentEnterpriseName = computed(() => currentInspectionTask.value?.enterp
 /** 当前检查任务摘要，给检查员明确知道图片会归档到哪里 */
 const currentTaskSummary = computed(() => {
   if (!currentEnterpriseId.value) return '步骤 1：选择或新建客户企业。未完成前不能上传图片和发起分析。'
-  if (!currentInspectionTask.value) return '步骤 2：创建检查任务。任务建立后，图片和报告会自动归档到该客户企业。'
+  if (!currentInspectionTask.value) return '步骤 2：创建检查任务。任务是一次上门检查档案；新对话只是聊天记录。'
   const task = currentInspectionTask.value
   return (task.task_no || '未编号任务') + ' · ' + (task.inspection_date || '未填写日期') + ' · ' + (task.status === 'completed' ? '已完成' : '进行中')
 })
@@ -989,10 +1018,11 @@ const uploadHazardImages = async (filePaths) => {
   hazardUploading.value = true
   uni.showLoading({ title: '上传中...' })
   const uploadedIds = []
+  const failedMessages = []
 
   try {
     for (const fp of filePaths) {
-      const ok = await new Promise((resolve) => {
+      const result = await new Promise((resolve) => {
         const task = uploadFile({
           url: apiUrl('/api/hazard/images/upload'),
           filePath: fp,
@@ -1010,19 +1040,22 @@ const uploadHazardImages = async (filePaths) => {
               created.forEach((item) => {
                 if (item?.id) uploadedIds.push(Number(item.id))
               })
-              resolve(true)
+              resolve({ ok: true })
             } else {
-              resolve(false)
+              resolve({ ok: false, msg: data?.msg || data?.message || '上传失败' })
             }
           },
-          fail: () => resolve(false)
+          fail: () => resolve({ ok: false, msg: '网络或文件上传失败' })
         })
       })
-      if (!ok) hazardFailedPaths.value.push(fp)
+      if (!result.ok) {
+        hazardFailedPaths.value.push(fp)
+        if (result.msg) failedMessages.push(result.msg)
+      }
     }
     await fetchHazardImages()
     if (hazardFailedPaths.value.length) {
-      uni.showToast({ title: `部分失败：${hazardFailedPaths.value.length} 张`, icon: 'none' })
+      uni.showToast({ title: failedMessages[0] || `部分失败：${hazardFailedPaths.value.length} 张`, icon: 'none' })
     } else {
       uni.showToast({ title: '上传完成', icon: 'success' })
     }
@@ -1133,6 +1166,43 @@ const onModelChange = (e) => {
 
 /** 当前用户所属企业 ID，用于隐患图片上传和 AI 分析时自动关联 */
 /** 初始化客户企业信息：优先从最近任务恢复检查对象，旧接口仅作为兼容兜底 */
+const openEnterpriseModal = () => {
+  showEnterpriseModal.value = true
+  searchClientEnterprises()
+}
+
+/** 搜索已保存客户企业，避免检查员只能新建而不能复用客户档案 */
+const searchClientEnterprises = () => {
+  if (clientEnterpriseLoading.value) return
+  clientEnterpriseLoading.value = true
+  return request({
+    url: apiUrl('/api/client-enterprises/search'),
+    method: 'POST',
+    data: { keyword: clientEnterpriseKeyword.value || '', limit: 20 },
+  }).then((res) => {
+    if (res.data?.success) clientEnterpriseList.value = res.data.data || []
+  }).catch(() => {
+    uni.showToast({ title: '客户企业搜索失败', icon: 'none' })
+  }).finally(() => {
+    clientEnterpriseLoading.value = false
+  })
+}
+
+/** 选择已有客户企业，只切换当前草稿，不删除任何已保存客户数据 */
+const selectClientEnterprise = (item) => {
+  if (!item?.id) return
+  currentEnterpriseId.value = item.id
+  currentInspectionTask.value = null
+  selectedHazardIds.value = []
+  hazardImageList.value = []
+  enterpriseForm.value = {
+    ...createEmptyEnterpriseForm(),
+    ...item,
+    inspection_date: toDateOnly(item.inspection_date || enterpriseForm.value.inspection_date),
+  }
+  uni.showToast({ title: '已选择客户企业，请创建任务', icon: 'none' })
+}
+
 const fetchEnterpriseInfo = () => {
   request({
     url: apiUrl('/api/enterprise/get'),
@@ -1201,7 +1271,7 @@ const saveEnterpriseInfo = () => {
   }).then((res) => {
       uni.hideLoading()
       if (res.data.success) {
-        const saved = res.data.data || res.data
+        const saved = (res.data.data && typeof res.data.data === 'object') ? res.data.data : res.data
         if (saved?.id) {
           currentEnterpriseId.value = saved.id
           enterpriseForm.value = { ...enterpriseForm.value, ...saved, inspection_date: toDateOnly(saved.inspection_date || enterpriseForm.value.inspection_date) }
@@ -1241,7 +1311,8 @@ const startInspectionTask = async () => {
       },
     })
     if (res.data?.success) {
-      currentInspectionTask.value = res.data.data
+      const task = (res.data.data && typeof res.data.data === 'object') ? res.data.data : res.data
+      currentInspectionTask.value = task
       selectedHazardIds.value = []
       hazardImageList.value = []
       await fetchInspectionTasks()
@@ -1354,7 +1425,7 @@ const handleSend = () => {
   if (!prompt.value && selectedHazardIds.value.length === 0) return
   if (!canSendMessage.value) {
     uni.showToast({ title: '请先选择客户企业并创建检查任务', icon: 'none' })
-    showEnterpriseModal.value = true
+    openEnterpriseModal()
     return
   }
 
@@ -1410,7 +1481,7 @@ const handleSend = () => {
     return
   }
 
-  // 纯文本对话：沿用 /api/process
+  // 纯文本咨询仍沿用 /api/process；图片隐患分析必须先绑定检查任务
   const reqTask = requestTask({
     url: apiUrl('/api/process'),
     method: 'POST',
@@ -3256,6 +3327,88 @@ const goToAdmin = () => {
     height: 128px;
     min-height: 128px;
   }
+}
+
+
+.client-picker-section {
+  max-width: 1100px;
+  margin: 0 auto 14px;
+  padding: 16px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  box-sizing: border-box;
+}
+.form-section-title.compact {
+  margin-bottom: 12px;
+}
+.client-search-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.client-search-input {
+  flex: 1;
+}
+.client-search-btn {
+  width: 96px;
+  height: 38px;
+  line-height: 38px;
+  border-radius: 8px;
+  border: 1px solid #202123;
+  background: #202123;
+  color: #fff;
+  font-size: 13px;
+}
+.client-result-list {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.client-result-item {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #e1e6ee;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.client-result-item.active {
+  border-color: #202123;
+  background: #f4f6f8;
+}
+.client-result-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.client-result-name {
+  color: #202123;
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.client-result-meta,
+.client-empty-tip {
+  color: #758398;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.client-result-action {
+  flex-shrink: 0;
+  color: #202123;
+  font-size: 12px;
+  font-weight: 700;
+}
+.client-empty-tip {
+  display: block;
+  margin-top: 10px;
 }
 
 /* PR21：检查任务面板，放在输入区上方，确保检查员明确先选企业再上传图片 */
