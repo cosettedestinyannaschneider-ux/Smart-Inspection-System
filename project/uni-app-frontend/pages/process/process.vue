@@ -58,20 +58,6 @@
         </view>
       </view>
 
-      <!-- 聊天流 -->
-      <view v-if="user.role !== 'admin'" class="task-context-bar">
-        <view class="task-context-main">
-          <text class="task-label">当前检查对象</text>
-          <text class="task-title">{{ currentEnterpriseName || '未选择客户企业' }}</text>
-          <text class="task-sub">{{ currentTaskSummary }}</text>
-        </view>
-        <view class="task-actions">
-          <button class="mini-btn" @click="showEnterpriseModal = true">选择/新建企业</button>
-          <button class="mini-btn save-btn" :disabled="!currentEnterpriseId || taskCreating" @click="startInspectionTask">{{ currentInspectionTask ? '新建任务' : '创建任务' }}</button>
-          <button v-if="currentInspectionTask" class="mini-btn struct-cancel-btn" @click="completeInspectionTask">完成任务</button>
-        </view>
-      </view>
-
       <view class="chat-flow-container">
         <scroll-view
           scroll-y
@@ -264,7 +250,20 @@
 
       <!-- 底部输入区 -->
       <view class="input-container">
-        <view class="input-wrapper">
+        <view v-if="user.role !== 'admin'" class="inspection-task-panel" :class="{ ready: currentInspectionTask }">
+          <view class="task-panel-main">
+            <text class="task-panel-kicker">本次检查归档</text>
+            <text class="task-panel-title">{{ currentEnterpriseName || '请先选择被检查客户企业' }}</text>
+            <text class="task-panel-desc">{{ currentTaskSummary }}</text>
+          </view>
+          <view class="task-panel-actions">
+            <button class="task-tab-btn primary" @click="showEnterpriseModal = true">客户企业</button>
+            <button class="task-tab-btn dark" :disabled="!currentEnterpriseId || taskCreating" @click="startInspectionTask">{{ currentInspectionTask ? '新建任务' : '创建任务' }}</button>
+            <button class="task-tab-btn" :disabled="!currentInspectionTask" @click="openHazardImageModal">图片记录</button>
+            <button v-if="currentInspectionTask" class="task-tab-btn muted" @click="completeInspectionTask">完成任务</button>
+          </view>
+        </view>
+        <view class="input-wrapper" :class="{ disabled: user.role !== 'admin' && !currentInspectionTask }">
           <view v-if="selectedHazardImages.length" class="selected-preview">
             <scroll-view scroll-x class="selected-preview-scroll">
               <view class="selected-preview-row">
@@ -282,15 +281,15 @@
           <textarea
             class="chat-input"
             v-model="prompt"
-            placeholder="输入现场描述、整改要求或安全生产问题..."
+            :placeholder="currentInspectionTask ? '输入现场描述、整改要求或安全生产问题...' : '请先在下方选择客户企业并创建检查任务'"
             :maxlength="1000"
             @confirm="handleSend"
             fixed
           />
           <view class="input-toolbar">
             <view class="toolbar-left">
-              <view class="attachment-btn" @click="handlePickImage">
-                <text>{{ selectedHazardIds.length || imagePath ? '图片已选' : '上传图片' }}</text>
+              <view class="attachment-btn" :class="{ disabled: user.role !== 'admin' && !currentInspectionTask }" @click="handlePickImage">
+                <text>{{ selectedHazardIds.length ? '图片已选' : '上传图片' }}</text>
               </view>
               <!-- 模型选择 -->
               <picker class="model-picker" :range="modelList" range-key="label" :value="selectedModelIndex" @change="onModelChange">
@@ -309,7 +308,7 @@
             </view>
             <button
               class="send-btn"
-              :disabled="!loading && (!canSendMessage || (!prompt && !imagePath && selectedHazardIds.length === 0))"
+              :disabled="!loading && (!canSendMessage || (!prompt && selectedHazardIds.length === 0))"
               @click="loading ? stopCurrentRequest() : handleSend()"
             >
               {{ loading ? '停止' : '发送' }}
@@ -463,8 +462,9 @@
 
         <!-- 底部操作区：提交与保存 -->
         <view class="form-footer">
-          <button class="footer-action-btn primary-btn" @click="saveEnterpriseInfo">提交信息</button>
-          <button class="footer-action-btn secondary-btn" @click="showEnterpriseModal = false">保存草稿</button>
+          <button class="footer-action-btn primary-btn" :disabled="enterpriseSaving" @click="saveEnterpriseInfo">{{ enterpriseSaving ? '提交中...' : '提交信息' }}</button>
+          <button class="footer-action-btn secondary-btn" @click="resetEnterpriseDraft">新建空白企业</button>
+          <button class="footer-action-btn secondary-btn" @click="showEnterpriseModal = false">暂不提交</button>
         </view>
       </view>
     </view>
@@ -571,6 +571,17 @@ const createEmptyEnterpriseForm = () => ({
   inspection_date: '',
 })
 const enterpriseForm = ref(createEmptyEnterpriseForm())
+
+/** 将日期输入统一为 YYYY-MM-DD，兼容后端 DATE 字段 */
+const toDateOnly = (value) => {
+  if (!value) return new Date().toISOString().slice(0, 10)
+  const text = String(value).trim()
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/)
+  if (match) return match[0]
+  const parsed = new Date(text)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return new Date().toISOString().slice(0, 10)
+}
 const showHazardImageModal = ref(false)
 const hazardImageList = ref([])
 const hazardUploading = ref(false)
@@ -585,6 +596,7 @@ const currentEnterpriseId = ref(null)
 const currentInspectionTask = ref(null)
 const inspectionTaskList = ref([])
 const taskCreating = ref(false)
+const enterpriseSaving = ref(false)
 const currentRequestTask = ref(null)
 const modelList = ref([])
 const selectedModelId = ref(null)
@@ -605,11 +617,12 @@ const selectedModelCode = computed(() => {
 
 /** 当前输入区已选图片，直接展示缩略图，避免用户只能去图片记录里确认 */
 /** 当前被检查客户企业名称 */
-const currentEnterpriseName = computed(() => enterpriseForm.value?.name || currentInspectionTask.value?.enterprise_name || '')
+const currentEnterpriseName = computed(() => currentInspectionTask.value?.enterprise_name || enterpriseForm.value?.name || '')
 
 /** 当前检查任务摘要，给检查员明确知道图片会归档到哪里 */
 const currentTaskSummary = computed(() => {
-  if (!currentInspectionTask.value) return '请先选择客户企业并创建检查任务，之后才能上传图片和发起分析。'
+  if (!currentEnterpriseId.value) return '步骤 1：选择或新建客户企业。未完成前不能上传图片和发起分析。'
+  if (!currentInspectionTask.value) return '步骤 2：创建检查任务。任务建立后，图片和报告会自动归档到该客户企业。'
   const task = currentInspectionTask.value
   return (task.task_no || '未编号任务') + ' · ' + (task.inspection_date || '未填写日期') + ' · ' + (task.status === 'completed' ? '已完成' : '进行中')
 })
@@ -1137,6 +1150,17 @@ const fetchEnterpriseInfo = () => {
 }
 
 /** 获取当前检查员最近任务，进入页面时自动恢复正在进行的任务 */
+const resetEnterpriseDraft = () => {
+  currentEnterpriseId.value = null
+  currentInspectionTask.value = null
+  selectedHazardIds.value = []
+  hazardImageList.value = []
+  enterpriseForm.value = {
+    ...createEmptyEnterpriseForm(),
+    inspection_date: new Date().toISOString().slice(0, 10),
+  }
+}
+
 const fetchInspectionTasks = () => {
   return request({
     url: apiUrl('/api/inspection-tasks/list'),
@@ -1161,36 +1185,39 @@ const fetchInspectionTasks = () => {
 }
 
 const saveEnterpriseInfo = () => {
+  if (enterpriseSaving.value) return
   // 基础表单校验
   if (!enterpriseForm.value.name) return uni.showToast({ title: '请输入企业名称', icon: 'none' })
   if (!enterpriseForm.value.region) return uni.showToast({ title: '请选择所在地区', icon: 'none' })
   if (!enterpriseForm.value.address) return uni.showToast({ title: '请输入详细地址', icon: 'none' })
   if (!enterpriseForm.value.contact) return uni.showToast({ title: '请输入联系人', icon: 'none' })
   if (!enterpriseForm.value.phone) return uni.showToast({ title: '请输入联系电话', icon: 'none' })
-
+  enterpriseSaving.value = true
   uni.showLoading({ title: '保存中...' })
   request({
     url: apiUrl('/api/client-enterprises/upsert'),
     method: 'POST',
-    data: { ...enterpriseForm.value, id: currentEnterpriseId.value || enterpriseForm.value.id || null },
+    data: { ...enterpriseForm.value, inspection_date: toDateOnly(enterpriseForm.value.inspection_date), id: currentEnterpriseId.value || enterpriseForm.value.id || null },
   }).then((res) => {
       uni.hideLoading()
       if (res.data.success) {
         const saved = res.data.data || res.data
         if (saved?.id) {
           currentEnterpriseId.value = saved.id
-          enterpriseForm.value = { ...enterpriseForm.value, ...saved }
+          enterpriseForm.value = { ...enterpriseForm.value, ...saved, inspection_date: toDateOnly(saved.inspection_date || enterpriseForm.value.inspection_date) }
           currentInspectionTask.value = null
           selectedHazardIds.value = []
           hazardImageList.value = []
         }
-        uni.showToast({ title: '已更新企业信息' })
+        uni.showToast({ title: '企业已保存，请创建任务' })
         showEnterpriseModal.value = false // 保存成功后关闭弹窗
         fetchInspectionTasks()
       }
     }).catch(() => {
       uni.hideLoading()
       uni.showToast({ title: '网络请求失败，请稍后重试', icon: 'none' })
+    }).finally(() => {
+      enterpriseSaving.value = false
     })
 }
 
@@ -1207,7 +1234,7 @@ const startInspectionTask = async () => {
       method: 'POST',
       data: {
         enterprise_id: currentEnterpriseId.value,
-        inspection_date: enterpriseForm.value.inspection_date || new Date().toISOString().slice(0, 10),
+        inspection_date: toDateOnly(enterpriseForm.value.inspection_date),
         location: enterpriseForm.value.address || enterpriseForm.value.region || '',
         requirement: prompt.value || '现场安全检查',
         remark: enterpriseForm.value.project_name || '',
@@ -1295,7 +1322,7 @@ const startNewChat = () => {
   currentSessionTitle.value = '新对话'
   messages.value = []
   prompt.value = ''
-  imagePath.value = ''
+
   selectedHazardIds.value = []
   if (uni.getSystemInfoSync().windowWidth < 768) showSidebar.value = false
 }
@@ -1324,18 +1351,22 @@ const deleteSession = (sessionId) => {
 // 发送/分析入口（9.5+9.6：支持单图/多图隐患分析，且可手动停止请求）
 const handleSend = () => {
   if (loading.value) return
-  if (!prompt.value && !imagePath.value && selectedHazardIds.value.length === 0) return
-  if (!canSendMessage.value) return uni.showToast({ title: '请先选择客户企业并创建检查任务', icon: 'none' })
+  if (!prompt.value && selectedHazardIds.value.length === 0) return
+  if (!canSendMessage.value) {
+    uni.showToast({ title: '请先选择客户企业并创建检查任务', icon: 'none' })
+    showEnterpriseModal.value = true
+    return
+  }
 
   const currentPrompt = prompt.value
-  const currentImage = imagePath.value
+
   const selectedIds = selectedHazardIds.value.slice()
   const selectedImages = mapHazardImagesForMessage(selectedIds)
   const suffix = selectedIds.length ? `\n（已选择隐患照片：${selectedIds.length} 张）` : ''
   const userMsg = {
     role: 'user',
     content: `${currentPrompt || ''}${suffix}`.trim(),
-    image: currentImage,
+    image: '',
     images: selectedImages,
   }
   messages.value.push(userMsg)
@@ -1349,34 +1380,12 @@ const handleSend = () => {
   messages.value.push(pendingAssistantMessage)
 
   prompt.value = ''
-  imagePath.value = ''
+
   selectedHazardIds.value = []
   loading.value = true
   scrollToBottom()
 
   currentRequestTask.value = null
-
-  if (currentImage) {
-    // 单图即时分析：沿用 /api/process（上传图片）
-    const uploadTask = uploadFile({
-      url: apiUrl('/api/process'),
-      filePath: currentImage,
-      name: 'file',
-      formData: {
-        prompt: currentPrompt,
-        session_id: currentSessionId.value,
-        model_id: selectedModelId.value || '',
-      },
-      success: (res) => handleResponse(JSON.parse(res.data)),
-      fail: (error) => handleError(error),
-      complete: () => {
-        currentRequestTask.value = null
-        loading.value = false
-      }
-    })
-    currentRequestTask.value = uploadTask
-    return
-  }
 
   if (selectedIds.length) {
     // 多图隐患分析（9.5 + 9.6）：使用已上传的隐患照片进行一次性分析
@@ -1537,7 +1546,7 @@ const handlePickImage = () => {
           ...selectedHazardIds.value,
           ...uploadedIds,
         ]))
-        imagePath.value = ''
+
       }
     }
   })
@@ -3248,54 +3257,84 @@ const goToAdmin = () => {
     min-height: 128px;
   }
 }
-</style>
 
-
-/* PR21：检查任务上下文条，明确图片和报告会归档到哪个客户企业 */
-.task-context-bar {
+/* PR21：检查任务面板，放在输入区上方，确保检查员明确先选企业再上传图片 */
+.inspection-task-panel {
+  max-width: 860px;
+  margin: 0 auto 10px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px max(24px, calc((100% - 860px) / 2));
-  border-bottom: 1px solid #ececf1;
-  background: #f7f7f8;
+  border: 1px solid #dfe3e8;
+  border-radius: 12px;
+  background: #f7f8fa;
+  box-sizing: border-box;
 }
-.task-context-main {
+.inspection-task-panel.ready {
+  background: #ffffff;
+  border-color: #cdd5df;
+}
+.task-panel-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
 }
-.task-label {
-  font-size: 12px;
+.task-panel-kicker {
   color: #6b7280;
+  font-size: 12px;
 }
-.task-title {
+.task-panel-title {
+  color: #202123;
   font-size: 15px;
-  color: #111827;
-  font-weight: 600;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.task-sub {
-  font-size: 12px;
+.task-panel-desc {
   color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
 }
-.task-actions {
+.task-panel-actions {
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
-  justify-content: flex-end;
 }
-@media (max-width: 768px) {
-  .task-context-bar {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 10px 5%;
-  }
-  .task-actions {
-    justify-content: flex-start;
-  }
+.task-tab-btn {
+  min-width: 82px;
+  height: 34px;
+  line-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #dfe3e8;
+  background: #ffffff;
+  color: #202123;
+  font-size: 12px;
 }
+.task-tab-btn.primary {
+  border-color: #202123;
+}
+.task-tab-btn.dark {
+  background: #202123;
+  color: #ffffff;
+  border-color: #202123;
+}
+.task-tab-btn.muted {
+  background: #f2f5f8;
+  color: #526078;
+}
+.task-tab-btn[disabled],
+.attachment-btn.disabled {
+  opacity: .5;
+}
+.input-wrapper.disabled {
+  border-color: #e5e7eb;
+  background: #fbfbfc;
+}
+</style>

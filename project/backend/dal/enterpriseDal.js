@@ -1,5 +1,18 @@
 const db = require('./db')
 
+/**
+ * 企业档案中的排查日期只保存日期部分；空值保留为空。
+ */
+const normalizeNullableDateOnly = (value) => {
+  if (!value) return null
+  const text = String(value).trim()
+  const datePart = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+  if (datePart) return datePart
+  const parsed = new Date(text)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return null
+}
+
 const enterpriseDal = {
   /**
    * 按用户所属部门推导企业
@@ -64,7 +77,7 @@ const enterpriseDal = {
         scale: data.scale || existed.scale || null,
         production_process: data.production_process || existed.production_process || null,
         inspector_name: data.inspector_name || existed.inspector_name || null,
-        inspection_date: data.inspection_date || existed.inspection_date || null,
+        inspection_date: normalizeNullableDateOnly(data.inspection_date) || existed.inspection_date || null,
         project_name: data.project_name || existed.project_name || null,
       })
       return this.findById(existed.id)
@@ -76,7 +89,7 @@ const enterpriseDal = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
       [name, data.region || null, data.address || null, data.contact || null, data.phone || null,
         data.industry || null, data.enterprise_type || null, data.scale || null,
-        data.production_process || null, data.inspector_name || null, data.inspection_date || null,
+        data.production_process || null, data.inspector_name || null, normalizeNullableDateOnly(data.inspection_date),
         data.project_name || null]
     )
     return this.findById(res.insertId)

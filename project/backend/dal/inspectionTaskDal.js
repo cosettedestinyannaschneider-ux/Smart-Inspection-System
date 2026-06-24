@@ -1,6 +1,20 @@
 const db = require('./db')
 
 /**
+ * 将前端可能传入的 ISO 时间、日期字符串统一转换为 MySQL DATE 可接受的 YYYY-MM-DD。
+ * 无法识别时使用当天日期，避免检查任务因为日期格式阻断主流程。
+ */
+const normalizeDateOnly = (value) => {
+  if (!value) return new Date().toISOString().slice(0, 10)
+  const text = String(value).trim()
+  const datePart = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+  if (datePart) return datePart
+  const parsed = new Date(text)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return new Date().toISOString().slice(0, 10)
+}
+
+/**
  * 检查任务数据访问层。
  *
  * 任务用于把检查员、被检查客户企业、隐患图片和报告串成同一条业务归档线。
@@ -29,7 +43,7 @@ const inspectionTaskDal = {
         taskNo,
         data.enterpriseId,
         data.inspectorId,
-        data.inspectionDate || new Date().toISOString().slice(0, 10),
+        normalizeDateOnly(data.inspectionDate),
         data.location || null,
         data.requirement || null,
         data.status || 'active',
