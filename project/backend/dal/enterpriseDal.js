@@ -30,6 +30,58 @@ const enterpriseDal = {
   },
 
   /** 查询组织管理所需企业列表，不依赖历史 enterprises.user_id */
+  /** 搜索被检查客户企业，用于检查员创建检查任务前选择客户档案 */
+  async searchClients(keyword = '', limit = 20) {
+    const kw = `%${String(keyword || '').trim()}%`
+    const safeLimit = Math.min(Math.max(Number(limit || 20), 1), 100)
+    const [rows] = await db.execute(
+      `SELECT id, name, region, address, contact, phone, industry, enterprise_type, scale,
+              production_process, project_name, inspection_status, status, updated_at
+       FROM enterprises
+       WHERE status = 'active'
+         AND (? = '%%' OR name LIKE ? OR region LIKE ? OR address LIKE ? OR contact LIKE ? OR industry LIKE ?)
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ${safeLimit}`,
+      [kw, kw, kw, kw, kw, kw]
+    )
+    return rows
+  },
+
+  /** 新建或更新被检查客户企业，避免前端直接依赖“用户所属企业”旧模型 */
+  async upsertClient(data = {}) {
+    const name = String(data.name || '').trim()
+    if (!name) throw new Error('企业名称不能为空')
+    const existed = data.id ? await this.findById(Number(data.id)) : await this.findByName(name)
+    if (existed) {
+      await this.updateById(existed.id, {
+        name,
+        region: data.region || existed.region || null,
+        address: data.address || existed.address || null,
+        contact: data.contact || existed.contact || null,
+        phone: data.phone || existed.phone || null,
+        industry: data.industry || existed.industry || null,
+        enterprise_type: data.enterprise_type || existed.enterprise_type || null,
+        scale: data.scale || existed.scale || null,
+        production_process: data.production_process || existed.production_process || null,
+        inspector_name: data.inspector_name || existed.inspector_name || null,
+        inspection_date: data.inspection_date || existed.inspection_date || null,
+        project_name: data.project_name || existed.project_name || null,
+      })
+      return this.findById(existed.id)
+    }
+    const [res] = await db.execute(
+      `INSERT INTO enterprises
+       (name, region, address, contact, phone, industry, enterprise_type, scale,
+        production_process, inspector_name, inspection_date, project_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [name, data.region || null, data.address || null, data.contact || null, data.phone || null,
+        data.industry || null, data.enterprise_type || null, data.scale || null,
+        data.production_process || null, data.inspector_name || null, data.inspection_date || null,
+        data.project_name || null]
+    )
+    return this.findById(res.insertId)
+  },
+
   async findOrganizationList() {
     const [rows] = await db.execute(
       `SELECT e.id, e.name, e.status, e.created_at, e.updated_at,

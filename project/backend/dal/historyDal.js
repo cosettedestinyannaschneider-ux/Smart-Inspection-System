@@ -18,10 +18,10 @@ const historyDal = {
   async createHistory(userId, prompt, result, wordPath, pdfPath, imagePath = null, sessionId = null, opts = {}) {
     const [res] = await db.execute(
       `INSERT INTO inspection_reports
-       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, title, review_status, review_required, report_allowed, report_block_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, inspection_task_id, title, review_status, review_required, report_allowed, report_block_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, prompt, result, wordPath, pdfPath, imagePath, sessionId,
-       opts.enterpriseId || null, opts.title || null,
+       opts.enterpriseId || null, opts.inspectionTaskId || null, opts.title || null,
        opts.reviewStatus || C.REPORT_REVIEW_PENDING, opts.reviewRequired ? 1 : 0,
        opts.reportAllowed === false ? 0 : 1, opts.reportBlockReason || null]
     )
@@ -33,6 +33,19 @@ const historyDal = {
       'SELECT * FROM inspection_reports WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     )
+    return rows
+  },
+
+  /** 按检查任务查询报告，普通用户只能查看自己的任务报告 */
+  async findByTaskId(inspectionTaskId, userId, isAdmin = false) {
+    const params = [inspectionTaskId]
+    let sql = 'SELECT * FROM inspection_reports WHERE inspection_task_id = ?'
+    if (!isAdmin) {
+      sql += ' AND user_id = ?'
+      params.push(userId)
+    }
+    sql += ' ORDER BY created_at DESC'
+    const [rows] = await db.execute(sql, params)
     return rows
   },
 

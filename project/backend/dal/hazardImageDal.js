@@ -10,8 +10,8 @@ const hazardImageDal = {
     const created = []
     for (const f of files) {
       const [res] = await db.execute(
-        'INSERT INTO hazard_images (user_id, file_path, original_name, file_size, enterprise_id) VALUES (?, ?, ?, ?, ?)',
-        [userId, f.filePath, f.originalName || null, f.fileSize || null, f.enterpriseId || null]
+        'INSERT INTO hazard_images (user_id, file_path, original_name, file_size, enterprise_id, inspection_task_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, f.filePath, f.originalName || null, f.fileSize || null, f.enterpriseId || null, f.inspectionTaskId || null]
       )
       created.push({
         id: res.insertId,
@@ -19,16 +19,30 @@ const hazardImageDal = {
         file_path: f.filePath,
         original_name: f.originalName || null,
         file_size: f.fileSize || null,
-        enterprise_id: f.enterpriseId || null
+        enterprise_id: f.enterpriseId || null,
+        inspection_task_id: f.inspectionTaskId || null
       })
     }
     return created
   },
 
-  async listByUserId(userId) {
+  async listByUserId(userId, filters = {}) {
+    const params = [userId]
+    let sql = "SELECT * FROM hazard_images WHERE user_id = ? AND status = 'active'"
+    if (filters.inspectionTaskId) {
+      sql += ' AND inspection_task_id = ?'
+      params.push(filters.inspectionTaskId)
+    }
+    sql += ' ORDER BY created_at DESC'
+    const [rows] = await db.execute(sql, params)
+    return rows
+  },
+
+  /** 管理员或任务详情使用的任务图片列表 */
+  async listByTaskId(inspectionTaskId) {
     const [rows] = await db.execute(
-      "SELECT * FROM hazard_images WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC",
-      [userId]
+      "SELECT * FROM hazard_images WHERE inspection_task_id = ? AND status = 'active' ORDER BY created_at DESC",
+      [inspectionTaskId]
     )
     return rows
   },
@@ -41,14 +55,17 @@ const hazardImageDal = {
   /**
    * 批量查询用户的隐患图片（用于 9.6 多图隐患分析）
    */
-  async findByIds(userId, ids) {
+  async findByIds(userId, ids, opts = {}) {
     const validIds = (ids || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
     if (!validIds.length) return []
     const placeholders = validIds.map(() => '?').join(',')
-    const [rows] = await db.execute(
-      `SELECT * FROM hazard_images WHERE user_id = ? AND id IN (${placeholders}) AND status = 'active'`,
-      [userId, ...validIds]
-    )
+    const params = [...validIds]
+    let sql = `SELECT * FROM hazard_images WHERE id IN (${placeholders}) AND status = 'active'`
+    if (!opts.isAdmin) {
+      sql += ' AND user_id = ?'
+      params.push(userId)
+    }
+    const [rows] = await db.execute(sql, params)
     const orderMap = new Map(validIds.map((id, index) => [id, index]))
     return rows.sort((a, b) => (orderMap.get(Number(a.id)) ?? 0) - (orderMap.get(Number(b.id)) ?? 0))
   },

@@ -30,7 +30,7 @@
       <view class="sidebar-footer">
         <view class="footer-btns">
           <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="showEnterpriseModal = true">
-            <text>企业档案</text>
+            <text>客户企业</text>
           </view>
           <view v-if="user.role !== 'admin'" class="footer-btn action-btn" @click="openHazardImageModal">
             <text>图片记录</text>
@@ -59,6 +59,19 @@
       </view>
 
       <!-- 聊天流 -->
+      <view v-if="user.role !== 'admin'" class="task-context-bar">
+        <view class="task-context-main">
+          <text class="task-label">当前检查对象</text>
+          <text class="task-title">{{ currentEnterpriseName || '未选择客户企业' }}</text>
+          <text class="task-sub">{{ currentTaskSummary }}</text>
+        </view>
+        <view class="task-actions">
+          <button class="mini-btn" @click="showEnterpriseModal = true">选择/新建企业</button>
+          <button class="mini-btn save-btn" :disabled="!currentEnterpriseId || taskCreating" @click="startInspectionTask">{{ currentInspectionTask ? '新建任务' : '创建任务' }}</button>
+          <button v-if="currentInspectionTask" class="mini-btn struct-cancel-btn" @click="completeInspectionTask">完成任务</button>
+        </view>
+      </view>
+
       <view class="chat-flow-container">
         <scroll-view
           scroll-y
@@ -296,7 +309,7 @@
             </view>
             <button
               class="send-btn"
-              :disabled="!loading && (!prompt && !imagePath && selectedHazardIds.length === 0)"
+              :disabled="!loading && (!canSendMessage || (!prompt && !imagePath && selectedHazardIds.length === 0))"
               @click="loading ? stopCurrentRequest() : handleSend()"
             >
               {{ loading ? '停止' : '发送' }}
@@ -312,7 +325,7 @@
         <!-- 弹窗头部：带返回按钮 -->
         <view class="form-header">
           <text class="modal-back-btn" @click="showEnterpriseModal = false">‹</text>
-          <text class="header-title">添加企业信息</text>
+          <text class="header-title">被检查客户企业</text>
         </view>
 
         <!-- 表单主体：滚动区域 -->
@@ -466,8 +479,8 @@
 
         <view class="hazard-toolbar">
           <view class="hazard-toolbar-main">
-            <button class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="pickHazardImages">
-              {{ hazardUploading ? '上传中...' : '选择图片上传' }}
+            <button class="footer-action-btn primary-btn" :disabled="hazardUploading || !currentInspectionTask" @click="pickHazardImages">
+              {{ hazardUploading ? '上传中...' : (currentInspectionTask ? '选择图片上传' : '请先创建检查任务') }}
             </button>
             <button v-if="hazardFailedPaths.length" class="footer-action-btn primary-btn" :disabled="hazardUploading" @click="retryFailedUploads">
               重试失败({{ hazardFailedPaths.length }})
@@ -568,6 +581,10 @@ const pendingHazardDelete = ref(null)
 const savingResult = ref(false)
 const reviewingResult = ref(false)
 const selectedHazardIds = ref([])
+const currentEnterpriseId = ref(null)
+const currentInspectionTask = ref(null)
+const inspectionTaskList = ref([])
+const taskCreating = ref(false)
 const currentRequestTask = ref(null)
 const modelList = ref([])
 const selectedModelId = ref(null)
@@ -587,6 +604,19 @@ const selectedModelCode = computed(() => {
 })
 
 /** 当前输入区已选图片，直接展示缩略图，避免用户只能去图片记录里确认 */
+/** 当前被检查客户企业名称 */
+const currentEnterpriseName = computed(() => enterpriseForm.value?.name || currentInspectionTask.value?.enterprise_name || '')
+
+/** 当前检查任务摘要，给检查员明确知道图片会归档到哪里 */
+const currentTaskSummary = computed(() => {
+  if (!currentInspectionTask.value) return '请先选择客户企业并创建检查任务，之后才能上传图片和发起分析。'
+  const task = currentInspectionTask.value
+  return (task.task_no || '未编号任务') + ' · ' + (task.inspection_date || '未填写日期') + ' · ' + (task.status === 'completed' ? '已完成' : '进行中')
+})
+
+/** 没有检查任务时禁止上传和分析，防止图片脱离客户企业归档 */
+const canSendMessage = computed(() => user.value?.role === 'admin' || !!currentInspectionTask.value)
+
 const selectedHazardImages = computed(() => {
   const recordMap = new Map(hazardImageList.value.map((img) => [Number(img.id), img]))
   return selectedHazardIds.value
@@ -911,8 +941,9 @@ const openHazardImageModal = () => {
  */
 const fetchHazardImages = () => {
   if (!user.value?.id) return
+  const query = currentInspectionTask.value?.id ? '?inspection_task_id=' + currentInspectionTask.value.id : ''
   return request({
-    url: apiUrl('/api/hazard/images/list'),
+    url: apiUrl('/api/hazard/images/list' + query),
     method: 'GET',
   }).then((res) => {
     if (res.data?.success) hazardImageList.value = res.data.data || []
@@ -953,7 +984,7 @@ const uploadHazardImages = async (filePaths) => {
           url: apiUrl('/api/hazard/images/upload'),
           filePath: fp,
           name: 'files',
-          formData: { enterprise_id: currentEnterpriseId.value || '' },
+          formData: { inspection_task_id: currentInspectionTask.value?.id || '' },
           success: (res) => {
             let data
             try {
@@ -1088,27 +1119,47 @@ const onModelChange = (e) => {
 }
 
 /** 当前用户所属企业 ID，用于隐患图片上传和 AI 分析时自动关联 */
-const currentEnterpriseId = ref(null)
-
+/** 初始化客户企业信息：优先从最近任务恢复检查对象，旧接口仅作为兼容兜底 */
 const fetchEnterpriseInfo = () => {
   request({
     url: apiUrl('/api/enterprise/get'),
     method: 'POST',
   }).then((res) => {
-      if (res.data.success) {
-        const d = res.data
-        const enterpriseData = d.data && typeof d.data === 'object' && Object.keys(d.data).length ? d.data : d
+    if (res.data.success) {
+      const d = res.data
+      const enterpriseData = d.data && typeof d.data === 'object' && Object.keys(d.data).length ? d.data : d
+      if (enterpriseData?.id) {
         enterpriseForm.value = { ...createEmptyEnterpriseForm(), ...enterpriseData }
-        /** 保存企业 ID 用于后续上传和分析时自动关联 */
-        currentEnterpriseId.value = enterpriseData.id || d.id || null
+        currentEnterpriseId.value = enterpriseData.id || null
       }
-    }).catch(() => {})
+    }
+  }).catch(() => {})
 }
 
-/**
- * 保存或更新企业信息
- * 包含表单校验和持久化存储，并记录操作日志
- */
+/** 获取当前检查员最近任务，进入页面时自动恢复正在进行的任务 */
+const fetchInspectionTasks = () => {
+  return request({
+    url: apiUrl('/api/inspection-tasks/list'),
+    method: 'POST',
+    data: { limit: 20 },
+  }).then((res) => {
+    if (!res.data?.success) return
+    inspectionTaskList.value = res.data.data || []
+    const active = inspectionTaskList.value.find((task) => task.status === 'active')
+    if (active && !currentInspectionTask.value) {
+      currentInspectionTask.value = active
+      currentEnterpriseId.value = active.enterprise_id
+      enterpriseForm.value = {
+        ...enterpriseForm.value,
+        id: active.enterprise_id,
+        name: active.enterprise_name || enterpriseForm.value.name,
+        industry: active.enterprise_industry || enterpriseForm.value.industry,
+        region: active.enterprise_region || enterpriseForm.value.region,
+      }
+    }
+  }).catch(() => {})
+}
+
 const saveEnterpriseInfo = () => {
   // 基础表单校验
   if (!enterpriseForm.value.name) return uni.showToast({ title: '请输入企业名称', icon: 'none' })
@@ -1119,14 +1170,23 @@ const saveEnterpriseInfo = () => {
 
   uni.showLoading({ title: '保存中...' })
   request({
-    url: apiUrl('/api/enterprise/update'),
+    url: apiUrl('/api/client-enterprises/upsert'),
     method: 'POST',
-    data: { ...enterpriseForm.value },
+    data: { ...enterpriseForm.value, id: currentEnterpriseId.value || enterpriseForm.value.id || null },
   }).then((res) => {
       uni.hideLoading()
       if (res.data.success) {
+        const saved = res.data.data || res.data
+        if (saved?.id) {
+          currentEnterpriseId.value = saved.id
+          enterpriseForm.value = { ...enterpriseForm.value, ...saved }
+          currentInspectionTask.value = null
+          selectedHazardIds.value = []
+          hazardImageList.value = []
+        }
         uni.showToast({ title: '已更新企业信息' })
         showEnterpriseModal.value = false // 保存成功后关闭弹窗
+        fetchInspectionTasks()
       }
     }).catch(() => {
       uni.hideLoading()
@@ -1135,6 +1195,57 @@ const saveEnterpriseInfo = () => {
 }
 
 // 获取会话列表
+
+/** 创建新的检查任务，新上传图片会自动归档到该任务 */
+const startInspectionTask = async () => {
+  if (!currentEnterpriseId.value) return uni.showToast({ title: '请先保存客户企业', icon: 'none' })
+  if (taskCreating.value) return
+  taskCreating.value = true
+  try {
+    const res = await request({
+      url: apiUrl('/api/inspection-tasks/start'),
+      method: 'POST',
+      data: {
+        enterprise_id: currentEnterpriseId.value,
+        inspection_date: enterpriseForm.value.inspection_date || new Date().toISOString().slice(0, 10),
+        location: enterpriseForm.value.address || enterpriseForm.value.region || '',
+        requirement: prompt.value || '现场安全检查',
+        remark: enterpriseForm.value.project_name || '',
+      },
+    })
+    if (res.data?.success) {
+      currentInspectionTask.value = res.data.data
+      selectedHazardIds.value = []
+      hazardImageList.value = []
+      await fetchInspectionTasks()
+      await fetchHazardImages()
+      uni.showToast({ title: '检查任务已创建', icon: 'success' })
+    } else {
+      uni.showToast({ title: res.data?.msg || '创建任务失败', icon: 'none' })
+    }
+  } finally {
+    taskCreating.value = false
+  }
+}
+
+/** 完成当前任务，完成后需要新建任务才能继续上传 */
+const completeInspectionTask = async () => {
+  if (!currentInspectionTask.value) return
+  const res = await request({
+    url: apiUrl('/api/inspection-tasks/complete'),
+    method: 'POST',
+    data: { inspection_task_id: currentInspectionTask.value.id },
+  })
+  if (res.data?.success) {
+    currentInspectionTask.value = null
+    selectedHazardIds.value = []
+    hazardImageList.value = []
+    await fetchInspectionTasks()
+    uni.showToast({ title: '任务已完成', icon: 'success' })
+  } else {
+    uni.showToast({ title: res.data?.msg || '操作失败', icon: 'none' })
+  }
+}
 const fetchSessions = () => {
   request({
     url: apiUrl('/api/sessions'),
@@ -1214,6 +1325,7 @@ const deleteSession = (sessionId) => {
 const handleSend = () => {
   if (loading.value) return
   if (!prompt.value && !imagePath.value && selectedHazardIds.value.length === 0) return
+  if (!canSendMessage.value) return uni.showToast({ title: '请先选择客户企业并创建检查任务', icon: 'none' })
 
   const currentPrompt = prompt.value
   const currentImage = imagePath.value
@@ -1275,7 +1387,7 @@ const handleSend = () => {
         prompt: currentPrompt,
         session_id: currentSessionId.value,
         image_ids: selectedIds,
-        enterprise_id: currentEnterpriseId.value || null,
+        inspection_task_id: currentInspectionTask.value?.id || null,
         model_id: selectedModelId.value || '',
       },
       success: (res) => handleResponse(res.data),
@@ -3137,3 +3249,53 @@ const goToAdmin = () => {
   }
 }
 </style>
+
+
+/* PR21：检查任务上下文条，明确图片和报告会归档到哪个客户企业 */
+.task-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px max(24px, calc((100% - 860px) / 2));
+  border-bottom: 1px solid #ececf1;
+  background: #f7f7f8;
+}
+.task-context-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.task-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+.task-title {
+  font-size: 15px;
+  color: #111827;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-sub {
+  font-size: 12px;
+  color: #6b7280;
+}
+.task-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 768px) {
+  .task-context-bar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 10px 5%;
+  }
+  .task-actions {
+    justify-content: flex-start;
+  }
+}

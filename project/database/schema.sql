@@ -119,12 +119,42 @@ CREATE TABLE auth_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='认证会话表';
 
 -- ============================================================================
--- 6. 隐患图片表（立项书 §四(五) 隐患图片上传与处理模块 + §9.5）
+-- 6. 检查任务表（PR21：一任务一被检查客户企业）
+-- ============================================================================
+CREATE TABLE inspection_tasks (
+  id              INT           NOT NULL AUTO_INCREMENT,
+  task_no         VARCHAR(64)   NOT NULL COMMENT '检查任务编号',
+  enterprise_id   INT           NOT NULL COMMENT '被检查客户企业',
+  inspector_id    INT           NOT NULL COMMENT '检查员用户ID',
+  inspection_date DATE          NOT NULL COMMENT '检查日期',
+  location        VARCHAR(500)  DEFAULT NULL COMMENT '检查地点',
+  requirement     TEXT          DEFAULT NULL COMMENT '检查要求或任务说明',
+  status          ENUM('active','completed','archived') NOT NULL DEFAULT 'active' COMMENT '任务状态',
+  remark          TEXT          DEFAULT NULL COMMENT '备注',
+  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_inspection_tasks_no (task_no),
+  KEY idx_it_enterprise_id (enterprise_id),
+  KEY idx_it_inspector_id (inspector_id),
+  KEY idx_it_inspection_date (inspection_date),
+  KEY idx_it_status (status),
+  CONSTRAINT fk_it_enterprise
+    FOREIGN KEY (enterprise_id) REFERENCES enterprises (id)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_it_inspector
+    FOREIGN KEY (inspector_id) REFERENCES users (id)
+    ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- 7. 隐患图片表（立项书 §四(五) 隐患图片上传与处理模块 + §9.5）
 -- ============================================================================
 CREATE TABLE hazard_images (
   id              INT           NOT NULL AUTO_INCREMENT,
   user_id         INT           NOT NULL COMMENT '上传用户',
   enterprise_id   INT           DEFAULT NULL COMMENT '关联企业',
+  inspection_task_id INT         DEFAULT NULL COMMENT '关联检查任务',
   file_path       VARCHAR(500)  NOT NULL COMMENT '文件存储路径',
   original_name   VARCHAR(255)  DEFAULT NULL COMMENT '原始文件名',
   file_size       BIGINT UNSIGNED DEFAULT NULL COMMENT '文件大小(字节)',
@@ -138,6 +168,7 @@ CREATE TABLE hazard_images (
   PRIMARY KEY (id),
   KEY idx_hi_user_id (user_id),
   KEY idx_hi_enterprise_id (enterprise_id),
+  KEY idx_hi_inspection_task_id (inspection_task_id),
   KEY idx_hi_hazard_type (hazard_type),
   KEY idx_hi_status (status),
   KEY idx_hi_created_at (created_at),
@@ -146,11 +177,14 @@ CREATE TABLE hazard_images (
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT fk_hi_enterprise
     FOREIGN KEY (enterprise_id) REFERENCES enterprises (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_hi_inspection_task
+    FOREIGN KEY (inspection_task_id) REFERENCES inspection_tasks (id)
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 7. 会话表（业务会话持久化，替代内存 Map）
+-- 8. 会话表（业务会话持久化，替代内存 Map）
 -- ============================================================================
 CREATE TABLE sessions (
   id          VARCHAR(64)   NOT NULL COMMENT 'UUID',
@@ -168,12 +202,15 @@ CREATE TABLE sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- 8. 排查报告表（原 results 表重命名，立项书 §四(七) 报告生成与下载模块）
+-- 9. 排查报告表（原 results 表重命名，立项书 §四(七) 报告生成与下载模块）
+-- ============================================================================
+-- 检查任务表：一任务一被检查客户企业，串联检查员、图片和报告
 -- ============================================================================
 CREATE TABLE inspection_reports (
   id              INT           NOT NULL AUTO_INCREMENT,
   user_id         INT           NOT NULL COMMENT '所属用户',
   enterprise_id   INT           DEFAULT NULL COMMENT '关联企业',
+  inspection_task_id INT         DEFAULT NULL COMMENT '关联检查任务',
   session_id      VARCHAR(64)   DEFAULT NULL COMMENT '关联会话',
   title           VARCHAR(300)  DEFAULT NULL COMMENT '报告标题',
   prompt          TEXT          DEFAULT NULL COMMENT '用户输入/AI prompt',
@@ -195,6 +232,7 @@ CREATE TABLE inspection_reports (
   KEY idx_ir_user_id (user_id),
   KEY idx_ir_session_id (session_id),
   KEY idx_ir_enterprise_id (enterprise_id),
+  KEY idx_ir_inspection_task_id (inspection_task_id),
   KEY idx_ir_status (status),
   KEY idx_ir_review_status (review_status),
   KEY idx_ir_reviewed_by (reviewed_by),
@@ -204,6 +242,9 @@ CREATE TABLE inspection_reports (
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT fk_ir_enterprise
     FOREIGN KEY (enterprise_id) REFERENCES enterprises (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_ir_inspection_task
+    FOREIGN KEY (inspection_task_id) REFERENCES inspection_tasks (id)
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_ir_session
     FOREIGN KEY (session_id) REFERENCES sessions (id)
