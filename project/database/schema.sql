@@ -550,6 +550,52 @@ CREATE TABLE hazard_rule_clause_refs (
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='隐患规则关联法规条款表';
 -- ============================================================================
+-- 18. AI 生成隐患规则草稿表（草稿审核后才进入正式规则库）
+-- ============================================================================
+CREATE TABLE hazard_rule_drafts (
+  id                          INT           NOT NULL AUTO_INCREMENT,
+  name                        VARCHAR(200)  NOT NULL COMMENT '规则草稿名称',
+  category_id                 INT           DEFAULT NULL COMMENT '所属法规分类',
+  hazard_level                VARCHAR(50)   NOT NULL COMMENT '候选隐患等级',
+  visible_fact_keywords       VARCHAR(500)  DEFAULT NULL COMMENT '可见事实关键词',
+  trigger_condition           TEXT          NOT NULL COMMENT '触发条件草稿',
+  required_evidence           TEXT          NOT NULL COMMENT '所需证据草稿',
+  image_evidence_supported    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '图片是否可独立支持判断',
+  insufficient_evidence_level VARCHAR(50)   NOT NULL DEFAULT '需人工复核' COMMENT '证据不足默认结论',
+  rectification_template      TEXT          NOT NULL COMMENT '整改建议模板草稿',
+  clause_ids_json             TEXT          NOT NULL COMMENT '引用的正式条文ID数组JSON',
+  generation_prompt           MEDIUMTEXT    DEFAULT NULL COMMENT '生成草稿时发送给模型的受控提示词',
+  ai_raw_response             MEDIUMTEXT    DEFAULT NULL COMMENT '模型原始返回内容',
+  generated_by                INT           DEFAULT NULL COMMENT '生成管理员ID',
+  review_status               ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending' COMMENT '审核状态',
+  review_note                 VARCHAR(1000) DEFAULT NULL COMMENT '审核备注',
+  reviewed_by                 INT           DEFAULT NULL COMMENT '审核管理员ID',
+  reviewed_at                 DATETIME      DEFAULT NULL COMMENT '审核时间',
+  approved_rule_id            INT           DEFAULT NULL COMMENT '审核通过后生成的正式规则ID',
+  status                      ENUM('active','archived') NOT NULL DEFAULT 'active' COMMENT '草稿状态',
+  created_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_hrd_category_id (category_id),
+  KEY idx_hrd_review_status (review_status),
+  KEY idx_hrd_generated_by (generated_by),
+  KEY idx_hrd_status (status),
+  KEY idx_hrd_approved_rule_id (approved_rule_id),
+  CONSTRAINT fk_hrd_category
+    FOREIGN KEY (category_id) REFERENCES knowledge_categories (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_hrd_generated_by
+    FOREIGN KEY (generated_by) REFERENCES users (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_hrd_reviewed_by
+    FOREIGN KEY (reviewed_by) REFERENCES users (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_hrd_approved_rule
+    FOREIGN KEY (approved_rule_id) REFERENCES hazard_rules (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI生成隐患规则草稿表';
+
+-- ============================================================================
 -- 14. 操作日志表（立项书：所有角色操作行为留痕 + §四(一)§4）
 -- ============================================================================
 CREATE TABLE action_logs (
