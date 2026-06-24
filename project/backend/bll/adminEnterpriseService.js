@@ -99,6 +99,25 @@ const adminEnterpriseService = {
    * @param {object} payload — 允许更新的企业档案字段
    * @param {string} [ipAddress]
    */
+
+  /**
+   * 管理员创建客户企业完整档案，创建后可继续分配检查员。
+   * @param {number} adminId
+   * @param {object} payload — 企业基础档案字段
+   * @param {string} [ipAddress]
+   */
+  async createProfile(adminId, payload, ipAddress = null) {
+    const data = {}
+    for (const field of ALLOWED_UPDATE_FIELDS) {
+      if (payload[field] !== undefined) data[field] = payload[field]
+    }
+    const name = String(data.name || '').trim()
+    if (!name) throw businessError('企业名称不能为空')
+    if (await enterpriseDal.findByName(name)) throw businessError('企业名称已存在')
+    const created = await enterpriseDal.upsertClient({ ...data, name, status: data.status || C.STATUS_ACTIVE })
+    await logDal.logAction(adminId, C.ACTION_ADMIN_ADD_ENTERPRISE, { id: created.id, name }, ipAddress)
+    return created
+  },
   async updateProfile(adminId, enterpriseId, payload, ipAddress = null) {
     if (!enterpriseId || !await enterpriseDal.findById(enterpriseId)) throw businessError('企业不存在')
     /** 仅保留白名单内字段，且不允许通过此接口修改企业组织名称（组织名称由阶段 B 独立管理） */

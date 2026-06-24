@@ -9,6 +9,7 @@ const userDal = require('../dal/userDal')
 const userPermissionDal = require('../dal/userPermissionDal')
 const authSessionDal = require('../dal/authSessionDal')
 const departmentDal = require('../dal/departmentDal')
+const enterpriseAssignmentDal = require('../dal/enterpriseAssignmentDal')
 const logDal = require('../dal/logDal')
 const db = require('../dal/db')
 const crypto = require('crypto')
@@ -16,7 +17,6 @@ const C = require('../common/Constants')
 
 /** 阶段 B 允许持久化的权限白名单 */
 const PERMISSION_KEYS = [
-  'enterprise:manage',
   'image:manage',
   'analysis:run',
   'report:download',
@@ -44,7 +44,7 @@ const normalizePermissions = (permissions, role) => {
 /** 校验用户角色与部门归属规则 */
 const validateOrganization = async (role, departmentId) => {
   if (![C.ROLE_ADMIN, C.ROLE_USER].includes(role)) throw businessError('用户角色不合法')
-  if (role === C.ROLE_USER && !departmentId) throw businessError('普通用户必须绑定有效部门')
+  // 检查员负责范围由 enterprise_inspector_assignments 控制，不再强制绑定客户企业部门。
   if (departmentId && !await departmentDal.findById(departmentId)) throw businessError('所属部门不存在')
 }
 
@@ -182,10 +182,21 @@ const userService = {
     if (!admin || admin.role !== C.ROLE_ADMIN || admin.status !== C.STATUS_ACTIVE) throw new Error('权限不足')
     const users = await userDal.findAll()
     const groupedPermissions = await userPermissionDal.findAllGrouped()
-    return users.map((user) => ({
-      ...user,
-      permissions: groupedPermissions[user.id] || {},
+    const assignmentRows = await Promise.all(users.map(async (user) => {
+      if (user.role === C.ROLE_ADMIN) return [user.id, []]
+      const rows = await enterpriseAssignmentDal.listByInspectorId(user.id)
+      return [user.id, rows]
     }))
+    const assignmentMap = Object.fromEntries(assignmentRows)
+    return users.map((user) => {
+      const assignedEnterprises = assignmentMap[user.id] || []
+      return {
+        ...user,
+        assigned_enterprises: assignedEnterprises,
+        assigned_enterprise_names: assignedEnterprises.map((item) => item.name).join('、'),
+        permissions: groupedPermissions[user.id] || {},
+      }
+    })
   },
 
   /**
@@ -240,6 +251,9 @@ const userService = {
     if (!username) throw businessError('用户名不能为空')
     if (id === Number(adminId) && (role !== C.ROLE_ADMIN || status === C.STATUS_DISABLED)) {
       throw businessError('禁止禁用当前管理员或取消当前管理员身份')
+    }
+    if (role !== target.role) {
+      throw businessError('用户角色创建后不可直接修改，请新建对应身份账号并处理历史任务归属')
     }
     const duplicated = await userDal.findByUsername(username)
     if (duplicated && Number(duplicated.id) !== id) throw businessError('用户名已存在')

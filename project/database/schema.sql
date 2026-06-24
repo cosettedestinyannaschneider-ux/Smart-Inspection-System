@@ -150,6 +150,34 @@ CREATE TABLE inspection_tasks (
 -- ============================================================================
 -- 7. 隐患图片表（立项书 §四(五) 隐患图片上传与处理模块 + §9.5）
 -- ============================================================================
+-- 6.1 企业-检查员分配表（管理员分配客户企业给检查员）
+-- ============================================================================
+CREATE TABLE enterprise_inspector_assignments (
+  id            INT          NOT NULL AUTO_INCREMENT,
+  enterprise_id INT          NOT NULL COMMENT '被检查客户企业ID',
+  inspector_id  INT          NOT NULL COMMENT '检查员用户ID',
+  status        ENUM('active','archived') NOT NULL DEFAULT 'active' COMMENT '分配状态',
+  assigned_by   INT          DEFAULT NULL COMMENT '分配操作管理员',
+  created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_enterprise_inspector (enterprise_id, inspector_id),
+  KEY idx_eia_enterprise_id (enterprise_id),
+  KEY idx_eia_inspector_id (inspector_id),
+  KEY idx_eia_status (status),
+  KEY idx_eia_assigned_by (assigned_by),
+  CONSTRAINT fk_eia_enterprise
+    FOREIGN KEY (enterprise_id) REFERENCES enterprises (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_eia_inspector
+    FOREIGN KEY (inspector_id) REFERENCES users (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_eia_assigned_by
+    FOREIGN KEY (assigned_by) REFERENCES users (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
 CREATE TABLE hazard_images (
   id              INT           NOT NULL AUTO_INCREMENT,
   user_id         INT           NOT NULL COMMENT '上传用户',

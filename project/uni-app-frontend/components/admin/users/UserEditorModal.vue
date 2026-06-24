@@ -1,11 +1,11 @@
 <template>
-  <!-- 用户新增与编辑弹窗，保持 H5 居中和微信端底部抽屉交互 -->
+  <!-- 用户新增与编辑弹窗：只维护账号、角色和功能权限，客户企业负责范围在企业档案页分配 -->
   <view v-if="visible" class="modal-mask" @click="$emit('close')">
     <view class="modal-panel" @click.stop="">
       <view class="modal-header">
         <view>
           <text class="modal-title">{{ isEdit ? '编辑用户' : '添加用户' }}</text>
-          <text class="modal-desc">{{ isEdit ? '修改账号信息与权限配置' : '创建新的系统用户账号' }}</text>
+          <text class="modal-desc">{{ isEdit ? '修改账号信息与权限配置' : '创建新的系统账号' }}</text>
         </view>
         <text class="modal-close" @click="$emit('close')">×</text>
       </view>
@@ -27,72 +27,29 @@
               </view>
             </view>
             <view class="form-item">
-              <view class="form-label-row">
-                <text class="form-label">所属企业</text>
-                <text class="manage-dept-link" @click="$emit('open-organization')">管理企业与部门</text>
-              </view>
-              <!-- 使用自定义企业选择器，避免 H5 弹窗内原生 picker 点击无响应 -->
-              <view class="department-selector">
-                <view class="picker-val" :class="{ selected: selectedEnterpriseName }" @click="$emit('toggle-enterprises')">
-                  <text>{{ selectedEnterpriseName || '请选择所属企业' }}</text>
-                  <text class="picker-arrow">{{ showEnterpriseOptions ? '⌃' : '⌄' }}</text>
-                </view>
-                <view v-if="showEnterpriseOptions" class="department-options">
-                  <view class="department-option" :class="{ active: !form.enterprise_id }" @click="$emit('select-enterprise', null)">
-                    不分配企业
-                  </view>
-                  <view
-                    v-for="enterprise in enterpriseList"
-                    :key="enterprise.id"
-                    class="department-option"
-                    :class="{ active: form.enterprise_id === enterprise.id }"
-                    @click="$emit('select-enterprise', enterprise)"
-                  >
-                    {{ enterprise.name }}
-                  </view>
-                </view>
-              </view>
-            </view>
-            <view class="form-item">
-              <text class="form-label">所属部门</text>
-              <!-- 部门选项严格根据已选择企业进行过滤 -->
-              <view class="department-selector">
-                <view class="picker-val" :class="{ selected: selectedDeptName, disabled: !form.enterprise_id }" @click="$emit('toggle-departments')">
-                  <text>{{ form.enterprise_id ? (selectedDeptName || '请选择所属部门') : '请先选择所属企业' }}</text>
-                  <text class="picker-arrow">{{ showDeptOptions ? '⌃' : '⌄' }}</text>
-                </view>
-                <view v-if="showDeptOptions" class="department-options">
-                  <view class="department-option" :class="{ active: !form.department_id }" @click="$emit('select-department', null)">
-                    不分配部门
-                  </view>
-                  <view
-                    v-for="department in availableDepartments"
-                    :key="department.id"
-                    class="department-option"
-                    :class="{ active: form.department_id === department.id }"
-                    @click="$emit('select-department', department)"
-                  >
-                    {{ department.name }}
-                  </view>
-                </view>
-              </view>
-            </view>
-            <view class="form-item">
               <text class="form-label">用户角色</text>
-              <view class="role-selector">
-                <view class="role-option" :class="{ active: form.role === 'user' }" @click="form.role = 'user'">普通用户</view>
+              <view v-if="!isEdit" class="role-selector">
+                <view class="role-option" :class="{ active: form.role === 'user' }" @click="form.role = 'user'">检查员</view>
                 <view class="role-option" :class="{ active: form.role === 'admin' }" @click="form.role = 'admin'">管理员</view>
               </view>
+              <view v-else class="role-locked">
+                <text>{{ form.role === 'admin' ? '管理员' : '检查员' }}</text>
+                <text>角色创建后不可在编辑页切换；如需变更身份，请新建对应账号并处理历史任务归属。</text>
+              </view>
+            </view>
+            <view class="form-item assignment-hint">
+              <text class="form-label">负责客户企业</text>
+              <text class="assignment-text">检查员负责的客户企业请到“企业数据查询”页面，在客户企业档案中使用“分配检查员”维护。</text>
             </view>
           </view>
         </view>
 
-        <!-- 普通用户功能权限 -->
+        <!-- 检查员功能权限 -->
         <view v-if="form.role === 'user'" class="form-section permission-section">
           <view class="section-heading">
             <view>
               <text class="section-title">功能权限</text>
-              <text class="section-desc">选择该用户允许使用的业务功能</text>
+              <text class="section-desc">选择该检查员允许使用的业务功能</text>
             </view>
             <view class="select-all" :class="{ active: allChecked }" @click="$emit('toggle-all')">
               {{ allChecked ? '取消全选' : '全选权限' }}
@@ -130,13 +87,7 @@ defineProps({
   visible: { type: Boolean, default: false },
   isEdit: { type: Boolean, default: false },
   showPwd: { type: Boolean, default: false },
-  showEnterpriseOptions: { type: Boolean, default: false },
-  showDeptOptions: { type: Boolean, default: false },
   form: { type: Object, required: true },
-  enterpriseList: { type: Array, default: () => [] },
-  availableDepartments: { type: Array, default: () => [] },
-  selectedEnterpriseName: { type: String, default: '' },
-  selectedDeptName: { type: String, default: '' },
   allChecked: { type: Boolean, default: false },
   permOptions: { type: Array, default: () => [] }
 })
@@ -146,15 +97,9 @@ defineEmits([
   'close',
   'save',
   'toggle-password',
-  'open-organization',
-  'toggle-enterprises',
-  'select-enterprise',
-  'toggle-departments',
-  'select-department',
   'toggle-all'
 ])
 </script>
-
 <style scoped>
 /* 用户编辑弹窗 */
 .modal-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(15,28,50,.46); box-sizing: border-box; }
@@ -187,6 +132,9 @@ defineEmits([
 .role-selector { height: 42px; padding: 3px; display: flex; gap: 4px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f9fbfd; box-sizing: border-box; }
 .role-option { flex: 1; display: flex; align-items: center; justify-content: center; border-radius: 7px; color: #7d899b; font-size: 13px; }
 .role-option.active { background: #fff; color: #1677ff; font-weight: 600; box-shadow: 0 2px 7px rgba(31,67,115,.1); }
+.role-locked { min-height: 42px; padding: 9px 12px; display: flex; flex-direction: column; gap: 4px; border: 1px solid #e2e9f2; border-radius: 9px; background: #f6f8fb; box-sizing: border-box; }
+.role-locked text:first-child { color: #263651; font-size: 13px; font-weight: 700; }
+.role-locked text:last-child { color: #8d99aa; font-size: 11px; line-height: 1.5; }
 .select-all { padding: 7px 12px; border-radius: 8px; background: #edf5ff; color: #1677ff; font-size: 12px; }
 .select-all.active { background: #e9f9f1; color: #17a66b; }
 .permission-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -226,7 +174,10 @@ defineEmits([
   .pwd-input { padding-right: 100rpx; }
   .pwd-toggle { right: 20rpx; top: 25rpx; font-size: 23rpx; }
   .role-selector { height: 78rpx; padding: 5rpx; border-radius: 13rpx; }
-  .role-option { border-radius: 10rpx; font-size: 25rpx; }
+    .role-option { border-radius: 10rpx; font-size: 25rpx; }
+  .role-locked { min-height: 78rpx; padding: 14rpx 20rpx; border-radius: 13rpx; }
+  .role-locked text:first-child { font-size: 25rpx; }
+  .role-locked text:last-child { font-size: 21rpx; }
   .select-all { padding: 11rpx 17rpx; border-radius: 12rpx; font-size: 22rpx; }
   .permission-grid { grid-template-columns: 1fr; gap: 14rpx; }
   .permission-card { padding: 20rpx; gap: 16rpx; border-radius: 16rpx; }

@@ -24,6 +24,7 @@ const schemaInit = {
     await this.step02AuthSessions()
     await this.step04_sessions()
     await this.step04InspectionTasks()
+    await this.step04EnterpriseInspectorAssignments()
     await this.step05_inspectionReports()
     await this.step07_hazardImages()
     await this.step06_inspectionReportImages()
@@ -284,17 +285,23 @@ const schemaInit = {
   // Step 4: 会话表（替代内存 Map）
   // =========================================================================
   async step04_sessions() {
-    if (await this._hasTable('sessions')) return
+    if (await this._hasTable('sessions')) {
+      await this._addColumn('sessions', 'inspection_task_id INT DEFAULT NULL')
+      await this._addIndex('sessions', 'idx_sessions_task', 'KEY idx_sessions_task (inspection_task_id)')
+      return
+    }
     await db.execute(`
       CREATE TABLE IF NOT EXISTS sessions (
         id          VARCHAR(64)   NOT NULL,
         user_id     INT           NOT NULL,
+        inspection_task_id INT     DEFAULT NULL,
         title       VARCHAR(200)  DEFAULT '新对话',
         status      VARCHAR(20)   NOT NULL DEFAULT 'active',
         created_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         KEY idx_sessions_user_id (user_id),
+        KEY idx_sessions_task (inspection_task_id),
         KEY idx_sessions_created_at (created_at),
         CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -352,6 +359,38 @@ const schemaInit = {
     await this._addFK('inspection_tasks', 'fk_it_inspector',
       'FOREIGN KEY (inspector_id) REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE')
   },
+
+  // =========================================================================
+  // Step 4.2: ??-?????????????????????
+  // =========================================================================
+  async step04EnterpriseInspectorAssignments() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS enterprise_inspector_assignments (
+        id            INT          NOT NULL AUTO_INCREMENT,
+        enterprise_id INT          NOT NULL,
+        inspector_id  INT          NOT NULL,
+        status        VARCHAR(20)  NOT NULL DEFAULT 'active',
+        assigned_by   INT          DEFAULT NULL,
+        created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_enterprise_inspector (enterprise_id, inspector_id),
+        KEY idx_eia_enterprise_id (enterprise_id),
+        KEY idx_eia_inspector_id (inspector_id),
+        KEY idx_eia_status (status),
+        KEY idx_eia_assigned_by (assigned_by),
+        CONSTRAINT fk_eia_enterprise FOREIGN KEY (enterprise_id) REFERENCES enterprises (id) ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT fk_eia_inspector FOREIGN KEY (inspector_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT fk_eia_assigned_by FOREIGN KEY (assigned_by) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+    await this._addIndex('enterprise_inspector_assignments', 'uk_enterprise_inspector', 'UNIQUE KEY uk_enterprise_inspector (enterprise_id, inspector_id)')
+    await this._addIndex('enterprise_inspector_assignments', 'idx_eia_enterprise_id', 'KEY idx_eia_enterprise_id (enterprise_id)')
+    await this._addIndex('enterprise_inspector_assignments', 'idx_eia_inspector_id', 'KEY idx_eia_inspector_id (inspector_id)')
+    await this._addIndex('enterprise_inspector_assignments', 'idx_eia_status', 'KEY idx_eia_status (status)')
+    await this._addIndex('enterprise_inspector_assignments', 'idx_eia_assigned_by', 'KEY idx_eia_assigned_by (assigned_by)')
+  },
+
   async step05_inspectionReports() {
     const hasResults = await this._hasTable('results')
     const hasReports = await this._hasTable('inspection_reports')
@@ -369,6 +408,7 @@ const schemaInit = {
           id              INT           NOT NULL AUTO_INCREMENT,
           user_id         INT           NOT NULL,
           enterprise_id   INT           DEFAULT NULL,
+          inspection_task_id INT         DEFAULT NULL,
           session_id      VARCHAR(64)   DEFAULT NULL,
           title           VARCHAR(300)  DEFAULT NULL,
           prompt          TEXT          DEFAULT NULL,
@@ -398,6 +438,7 @@ const schemaInit = {
     if (hasReports || hasResults) {
       for (const colDef of [
         'enterprise_id INT DEFAULT NULL',
+        'inspection_task_id INT DEFAULT NULL',
         'session_id VARCHAR(64) DEFAULT NULL',
         'title VARCHAR(300) DEFAULT NULL',
         'image_path VARCHAR(500) DEFAULT NULL',
@@ -427,6 +468,8 @@ const schemaInit = {
       'FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE')
     await this._addFK('inspection_reports', 'fk_ir_enterprise',
       'FOREIGN KEY (enterprise_id) REFERENCES enterprises (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('inspection_reports', 'fk_ir_inspection_task',
+      'FOREIGN KEY (inspection_task_id) REFERENCES inspection_tasks (id) ON DELETE SET NULL ON UPDATE CASCADE')
     await this._addFK('inspection_reports', 'fk_ir_session',
       'FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE SET NULL ON UPDATE CASCADE')
     await this._addFK('inspection_reports', 'fk_ir_reviewed_by',
@@ -478,6 +521,7 @@ const schemaInit = {
     // 新增列
     for (const colDef of [
       'enterprise_id INT DEFAULT NULL',
+      'inspection_task_id INT DEFAULT NULL',
       'image_width INT UNSIGNED DEFAULT NULL',
       'image_height INT UNSIGNED DEFAULT NULL',
       'hazard_type VARCHAR(100) DEFAULT NULL',
@@ -502,6 +546,8 @@ const schemaInit = {
       'FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE')
     await this._addFK('hazard_images', 'fk_hi_enterprise',
       'FOREIGN KEY (enterprise_id) REFERENCES enterprises (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('hazard_images', 'fk_hi_inspection_task',
+      'FOREIGN KEY (inspection_task_id) REFERENCES inspection_tasks (id) ON DELETE SET NULL ON UPDATE CASCADE')
   },
 
   // =========================================================================

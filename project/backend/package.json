@@ -8,7 +8,8 @@
     "check": "node scripts/check-syntax.js",
     "test": "node --test",
     "validate:legal-clauses": "node scripts/validate-legal-clauses.js",
-    "import:legal-clauses": "node scripts/import-legal-clauses.js"
+    "import:legal-clauses": "node scripts/import-legal-clauses.js",
+    "reset:demo-db": "node scripts/reset-demo-db.js"
   },
   "dependencies": {
     "axios": "^1.6.2",

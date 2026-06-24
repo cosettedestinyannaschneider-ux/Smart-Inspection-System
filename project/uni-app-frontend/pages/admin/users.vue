@@ -4,7 +4,7 @@
     <view class="page-heading">
       <view>
         <text class="heading-title">用户管理</text>
-        <text class="heading-desc">管理检查员账号、所属企业部门和功能权限</text>
+        <text class="heading-desc">管理检查员账号、负责客户企业和功能权限</text>
       </view>
       <view class="primary-btn" @click="openAddModal">
         <text class="primary-icon">＋</text>
@@ -27,7 +27,7 @@
     <view class="filter-panel">
       <view class="search-box">
         <text class="search-symbol">⌕</text>
-        <input v-model="keyword" class="search-input" placeholder="搜索用户名、企业或部门" />
+        <input v-model="keyword" class="search-input" placeholder="搜索用户名或负责客户企业" />
         <text v-if="keyword" class="clear-search" @click="keyword = ''">×</text>
       </view>
       <view class="role-filters">
@@ -59,7 +59,7 @@
       <view class="table-header">
         <text class="col-user">用户</text>
         <text class="col-role">角色</text>
-        <text class="col-dept">所属企业 / 部门</text>
+        <text class="col-dept">负责客户企业</text>
         <text class="col-status">状态</text>
         <text class="col-date">注册时间</text>
         <text class="col-action">操作</text>
@@ -79,8 +79,8 @@
           </text>
         </view>
         <view class="col-dept org-text">
-          <text class="enterprise-text">{{ item.enterprise_name || '未分配企业' }}</text>
-          <text class="dept-text">{{ item.department_name || '未分配部门' }}</text>
+          <text class="enterprise-text">{{ item.role === 'admin' ? '系统管理员' : (item.assigned_enterprise_names || '未分配客户企业') }}</text>
+          <text class="dept-text">{{ item.role === 'admin' ? '可查看全部客户企业与任务' : '在客户企业档案中维护负责范围' }}</text>
         </view>
         <view class="col-status">
           <text class="status-tag" :class="item.status === 'disabled' ? 'tag-disabled' : 'tag-active'">
@@ -113,12 +113,8 @@
           </view>
         </view>
         <view class="mobile-meta-row">
-          <text class="meta-label">所属企业</text>
-          <text class="meta-value">{{ item.enterprise_name || '未分配企业' }}</text>
-        </view>
-        <view class="mobile-meta-row">
-          <text class="meta-label">所属部门</text>
-          <text class="meta-value">{{ item.department_name || '未分配部门' }}</text>
+          <text class="meta-label">负责客户企业</text>
+          <text class="meta-value">{{ item.role === 'admin' ? '可查看全部客户企业' : (item.assigned_enterprise_names || '未分配客户企业') }}</text>
         </view>
         <view class="mobile-meta-row">
           <text class="meta-label">账号状态</text>
@@ -140,51 +136,13 @@
       :visible="showModal"
       :is-edit="isEdit"
       :show-pwd="showPwd"
-      :show-enterprise-options="showEnterpriseOptions"
-      :show-dept-options="showDeptOptions"
       :form="form"
-      :enterprise-list="enterpriseList"
-      :available-departments="availableDepartments"
-      :selected-enterprise-name="selectedEnterpriseName"
-      :selected-dept-name="selectedDeptName"
       :all-checked="allChecked"
       :perm-options="permOptions"
       @close="closeModal"
       @save="saveUser"
       @toggle-password="showPwd = !showPwd"
-      @open-organization="openDepartmentModal"
-      @toggle-enterprises="toggleEnterpriseOptions"
-      @select-enterprise="selectEnterprise"
-      @toggle-departments="toggleDepartmentOptions"
-      @select-department="selectDepartment"
       @toggle-all="toggleAll"
-    />
-
-    <OrganizationManagementModal
-      :visible="showDeptModal"
-      :enterprise-list="enterpriseList"
-      :managed-enterprise-id="managedEnterpriseId"
-      :managed-enterprise="managedEnterprise"
-      :managed-departments="managedDepartments"
-      :enterprise-form="enterpriseForm"
-      :department-form="departmentForm"
-      :get-department-user-count="getDepartmentUserCount"
-      @close="closeDepartmentModal"
-      @edit-enterprise="editEnterprise"
-      @delete-enterprise="deleteEnterprise"
-      @reset-enterprise="resetEnterpriseForm"
-      @save-enterprise="saveEnterprise"
-      @select-enterprise="selectManagedEnterprise"
-      @reset-department="resetDepartmentForm"
-      @save-department="saveDepartment"
-      @edit-department="editDepartment"
-      @delete-department="deleteDepartment"
-    />
-
-    <OrganizationDeleteConfirm
-      :state="organizationDeleteConfirm"
-      @close="closeOrganizationDeleteConfirm"
-      @confirm="confirmOrganizationDelete"
     />
   </AdminShell>
 </template>
@@ -193,8 +151,6 @@
 import { ref } from 'vue'
 import AdminShell from '../../components/admin/AdminShell.vue'
 import UserEditorModal from '../../components/admin/users/UserEditorModal.vue'
-import OrganizationManagementModal from '../../components/admin/users/OrganizationManagementModal.vue'
-import OrganizationDeleteConfirm from '../../components/admin/users/OrganizationDeleteConfirm.vue'
 import { createAdminOrganizationApi } from '../../common/api/admin-organization-api'
 import {
   permOptions,
@@ -202,7 +158,6 @@ import {
   statusFilters,
   useUserListPresentation
 } from '../../composables/useUserManagement'
-import { useOrganizationManagement } from '../../composables/useOrganizationManagement'
 import { useUserEditor } from '../../composables/useUserEditor'
 
 /** 当前已登录管理员 */
@@ -220,63 +175,16 @@ const { postAdmin } = createAdminOrganizationApi()
 const showRequestError = (error) => {
   uni.showToast({ title: error?.message || '操作失败', icon: 'none' })
 }
-
-/** 企业与部门组织管理状态和操作 */
-const {
-  enterpriseList,
-  deptList,
-  showDeptModal,
-  managedEnterpriseId,
-  enterpriseForm,
-  departmentForm,
-  organizationDeleteConfirm,
-  managedEnterprise,
-  managedDepartments,
-  fetchEnterprises,
-  fetchDepartments,
-  openDepartmentModal,
-  closeDepartmentModal,
-  resetEnterpriseForm,
-  resetDepartmentForm,
-  selectManagedEnterprise,
-  saveEnterprise,
-  editEnterprise,
-  closeOrganizationDeleteConfirm,
-  confirmOrganizationDelete,
-  deleteEnterprise,
-  saveDepartment,
-  editDepartment,
-  getDepartmentUserCount,
-  deleteDepartment
-} = useOrganizationManagement({
-  postAdmin,
-  userList,
-  getUserForm: () => form,
-  fetchUsers: (...args) => fetchUsers(...args),
-  showRequestError,
-  closeUserOrganizationOptions: (...args) => closeUserOrganizationOptions(...args)
-})
-
 /** 用户新增、编辑、权限和启用禁用状态与操作 */
 const {
   showModal,
   isEdit,
   showPwd,
-  showDeptOptions,
-  showEnterpriseOptions,
   form,
-  selectedEnterpriseName,
-  availableDepartments,
-  selectedDeptName,
   allChecked,
-  closeUserOrganizationOptions,
   openAddModal,
   openEditModal,
   closeModal,
-  toggleEnterpriseOptions,
-  selectEnterprise,
-  toggleDepartmentOptions,
-  selectDepartment,
   toggleAll,
   saveUser,
   handleEnable,
@@ -284,10 +192,7 @@ const {
 } = useUserEditor({
   postAdmin,
   currentAdmin: user,
-  enterpriseList,
-  deptList,
   fetchUsers: (...args) => fetchUsers(...args),
-  fetchEnterprises,
   showRequestError
 })
 
@@ -306,8 +211,6 @@ const { summaryCards, filteredUsers } = useUserListPresentation({
 const handleAdminReady = (admin) => {
   user.value = admin
   fetchUsers()
-  fetchEnterprises()
-  fetchDepartments()
 }
 
 /** 加载真实用户列表 */

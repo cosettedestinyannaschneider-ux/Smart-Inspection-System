@@ -54,18 +54,25 @@ const historyDal = {
     return rows[0]
   },
 
-  async findSessionsByUserId(userId) {
+  async findSessionsByUserId(userId, filters = {}) {
+    const params = [userId]
+    let where = "s.user_id = ? AND s.status = 'active'"
+    if (filters.inspectionTaskId) {
+      where += ' AND s.inspection_task_id = ?'
+      params.push(filters.inspectionTaskId)
+    }
     const [rows] = await db.execute(`
       SELECT
         s.id AS session_id,
+        s.inspection_task_id,
         COALESCE(NULLIF(MAX(ir.prompt), ''), NULLIF(MAX(s.title), ''), '新对话') AS title,
         MAX(ir.created_at) AS created_at
       FROM sessions s
       LEFT JOIN inspection_reports ir ON ir.session_id = s.id AND ir.user_id = s.user_id
-      WHERE s.user_id = ? AND s.status = 'active'
-      GROUP BY s.id
-      ORDER BY created_at DESC, s.updated_at DESC
-    `, [userId])
+      WHERE ${where}
+      GROUP BY s.id, s.inspection_task_id
+      ORDER BY COALESCE(MAX(ir.created_at), s.updated_at) DESC, s.updated_at DESC
+    `, params)
     return rows
   },
 
@@ -77,11 +84,15 @@ const historyDal = {
     return rows
   },
 
-  async findBySessionIdForUser(sessionId, userId) {
-    const [rows] = await db.execute(
-      'SELECT * FROM inspection_reports WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC',
-      [sessionId, userId]
-    )
+  async findBySessionIdForUser(sessionId, userId, filters = {}) {
+    const params = [sessionId, userId]
+    let sql = 'SELECT * FROM inspection_reports WHERE session_id = ? AND user_id = ?'
+    if (filters.inspectionTaskId) {
+      sql += ' AND inspection_task_id = ?'
+      params.push(filters.inspectionTaskId)
+    }
+    sql += ' ORDER BY created_at ASC'
+    const [rows] = await db.execute(sql, params)
     return rows
   },
 

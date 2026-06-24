@@ -98,6 +98,8 @@ const inspectionTaskDal = {
     if (filters.status) {
       conditions.push('t.status = ?')
       params.push(filters.status)
+    } else if (!filters.includeArchived) {
+      conditions.push("t.status <> 'archived'")
     }
     if (filters.keyword) {
       conditions.push('(t.task_no LIKE ? OR e.name LIKE ? OR t.location LIKE ? OR t.requirement LIKE ?)')
@@ -146,9 +148,9 @@ const inspectionTaskDal = {
     return rows
   },
 
-  /** 完成任务，后续仍可在管理员端归档查询 */
-  async complete(id, userId, isAdmin = false) {
-    const params = ['completed', id]
+  /** 更新任务归档状态，普通检查员只能操作自己的任务 */
+  async updateStatus(id, status, userId, isAdmin = false) {
+    const params = [status, id]
     let sql = 'UPDATE inspection_tasks SET status = ? WHERE id = ?'
     if (!isAdmin) {
       sql += ' AND inspector_id = ?'
@@ -156,6 +158,21 @@ const inspectionTaskDal = {
     }
     const [res] = await db.execute(sql, params)
     return res.affectedRows > 0
+  },
+
+  /** 归档任务 */
+  async archive(id, userId, isAdmin = false) {
+    return this.updateStatus(id, 'archived', userId, isAdmin)
+  },
+
+  /** 恢复任务 */
+  async restore(id, userId, isAdmin = false) {
+    return this.updateStatus(id, 'active', userId, isAdmin)
+  },
+
+  /** 保留旧完成接口兼容，内部按归档处理 */
+  async complete(id, userId, isAdmin = false) {
+    return this.archive(id, userId, isAdmin)
   },
 }
 
