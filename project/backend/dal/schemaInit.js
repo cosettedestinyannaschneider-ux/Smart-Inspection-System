@@ -36,6 +36,7 @@ const schemaInit = {
     await this.step09InspectionReportKnowledgeRefs()
     await this.step09InspectionReportRuleRefs()
     await this.step09HazardRules()
+    await this.step09HazardRuleDrafts()
     await this.step10_actionLogs()
     await this.step11_aiModelConfigs()
     await this.step12_reportTemplates()

@@ -82,6 +82,41 @@ test('规则只能关联 verified 且现行有效的正式条文', async () => {
   }
 })
 
+test('现行国家标准条文可作为正式规则依据', async () => {
+  let clauseIdsForCreate = null
+
+  patch(knowledgeCategoryDal, 'findById', async () => ({ id: 5, name: '消防安全' }))
+  patch(hazardRuleDal, 'findVerifiedClausesByIds', async () => [{
+    id: 21,
+    current_status: '现行',
+    verification_status: 'verified',
+    source_title: '手提式灭火器',
+  }])
+  patch(hazardRuleDal, 'create', async (payload, clauseIds) => {
+    clauseIdsForCreate = clauseIds
+    return 21
+  })
+  patch(hazardRuleDal, 'findById', async () => createRuleRecord({
+    id: 21,
+    category_id: 5,
+    category_name: '消防安全',
+    hazard_level: '一般隐患',
+    clause_refs: [{ clause_id: 21, source_title: '手提式灭火器', current_status: '现行' }],
+  }))
+
+  try {
+    const created = await hazardRuleService.create(createRulePayload({
+      category_id: 5,
+      hazard_level: '一般隐患',
+      clause_ids: [21],
+    }))
+    assert.deepEqual(clauseIdsForCreate, [21])
+    assert.deepEqual(created.clause_ids, [21])
+  } finally {
+    restorePatches()
+  }
+})
+
 test('未启用的重大规则允许先保存为草稿，后续补充依据后再启用', async () => {
   let createdPayload = null
   let createdClauseIds = null
@@ -136,12 +171,16 @@ test('规则种子重复导入时按 seed_key 更新而不是重复创建', asyn
     { id: 4, name: '建筑施工安全' },
     { id: 8, name: '工贸行业安全' },
     { id: 6, name: '特种设备安全' },
+    { id: 12, name: '职业健康与劳动安全' },
   ]
   let createCount = 0
   let updateCount = 0
 
   patch(knowledgeCategoryDal, 'findAll', async () => categories)
-  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async () => [{ id: 31 }])
+  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async ({ limit }) => {
+    assert.ok([1, 2].includes(limit))
+    return [{ id: 31 }, { id: 32 }]
+  })
   patch(hazardRuleDal, 'findBySeedKey', async () => null)
   patch(hazardRuleDal, 'create', async () => {
     createCount += 1
@@ -157,7 +196,10 @@ test('规则种子重复导入时按 seed_key 更新而不是重复创建', asyn
   }
 
   patch(knowledgeCategoryDal, 'findAll', async () => categories)
-  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async () => [{ id: 31 }])
+  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async ({ limit }) => {
+    assert.ok([1, 2].includes(limit))
+    return [{ id: 31 }, { id: 32 }]
+  })
   patch(hazardRuleDal, 'findBySeedKey', async (seedKey) => createRuleRecord({ id: seedKey.length, seed_key: seedKey }))
   patch(hazardRuleDal, 'updateById', async () => { updateCount += 1 })
   patch(hazardRuleDal, 'create', async () => { createCount += 1 })
@@ -167,6 +209,34 @@ test('规则种子重复导入时按 seed_key 更新而不是重复创建', asyn
     assert.equal(second.updated_rules, second.total_rules)
     assert.equal(second.created_rules, 0)
     assert.equal(updateCount, second.total_rules)
+  } finally {
+    restorePatches()
+  }
+})
+
+test('安全帽种子规则允许从劳动防护相关分类补充检索依据', async () => {
+  const categories = [
+    { id: 4, name: '建筑施工安全' },
+    { id: 8, name: '工贸行业安全' },
+    { id: 12, name: '职业健康与劳动安全' },
+  ]
+  const calls = []
+
+  patch(knowledgeCategoryDal, 'findAll', async () => categories)
+  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async (params) => {
+    calls.push(params)
+    return [{ id: 453 }, { id: 1988 }]
+  })
+  patch(hazardRuleDal, 'findBySeedKey', async () => null)
+  patch(hazardRuleDal, 'create', async () => 1)
+
+  try {
+    await hazardRuleService.importSeedPack()
+    const helmetCall = calls.find((item) => (item.keywords || []).includes('安全帽'))
+    assert.ok(helmetCall)
+    assert.equal(helmetCall.category_id, 4)
+    assert.deepEqual(helmetCall.category_ids, [12, 8])
+    assert.deepEqual(helmetCall.required_keywords, ['佩戴'])
   } finally {
     restorePatches()
   }

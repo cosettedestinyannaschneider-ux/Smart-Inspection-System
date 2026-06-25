@@ -151,6 +151,27 @@ const knowledgeDal = {
     }
   },
 
+  /** 按法规/标准标题批量查询有效知识文档，用于正式 CSV 刷新前归档旧版本 */
+  async findActiveByTitles(titles = []) {
+    const normalizedTitles = Array.from(new Set(
+      titles.map((item) => String(item || '').trim()).filter(Boolean)
+    ))
+    if (!normalizedTitles.length) return []
+
+    const placeholders = normalizedTitles.map(() => '?').join(', ')
+    const [rows] = await db.execute(`
+      ${KNOWLEDGE_SELECT_SQL}
+      WHERE k.status = 'active'
+        AND k.title IN (${placeholders})
+      ORDER BY k.title ASC, k.id ASC
+    `, normalizedTitles)
+
+    return rows.map((row) => ({
+      ...row,
+      file_name: row.file_path ? path.posix.basename(String(row.file_path).replace(/\\/g, '/')) : null,
+    }))
+  },
+
   /** 按 ID 集合查询有效知识库记录 */
   async findActiveByIds(ids = []) {
     const normalizedIds = ids.map((item) => Number(item || 0)).filter((item) => item > 0)

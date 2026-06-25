@@ -4,10 +4,28 @@ const {
   REQUIRED_HEADERS,
   stringifyCsv,
   parseCsvRecords,
+  importCsvText,
 } = require('../bll/legalClauseImportService')
+const knowledgeDal = require('../dal/knowledgeDal')
+const knowledgeCategoryDal = require('../dal/knowledgeCategoryDal')
+const knowledgeCategoryRelationDal = require('../dal/knowledgeCategoryRelationDal')
+const knowledgeClauseDal = require('../dal/knowledgeClauseDal')
 const {
   validateLegalClauseCsvText,
 } = require('../bll/legalClauseValidationService')
+
+const originalMethods = []
+const patch = (target, method, implementation) => {
+  originalMethods.push([target, method, target[method]])
+  target[method] = implementation
+}
+
+const restorePatches = () => {
+  while (originalMethods.length) {
+    const [target, method, original] = originalMethods.pop()
+    target[method] = original
+  }
+}
 
 test('法规条文 CSV 模板包含固定表头', () => {
   assert.deepEqual(REQUIRED_HEADERS, [
@@ -93,4 +111,70 @@ test('法规条文 CSV 短条文只产生 warning', () => {
   const summary = validateLegalClauseCsvText(csv)
   assert.equal(summary.passed, true)
   assert.equal(summary.warning_count, 1)
+})
+
+test('国家标准现行状态允许填写“现行”', () => {
+  const csv = stringifyCsv([{
+    分类: '消防安全',
+    法规名称: '手提式灭火器',
+    '文号/标准号': 'GB 4351-2023',
+    条款号: '5.1',
+    条文内容: '灭火器应符合对应配置和使用要求。',
+    关键词: '灭火器,配置',
+    官方来源URL: 'https://openstd.samr.gov.cn/example',
+    发布机关: '国家市场监督管理总局、国家标准化管理委员会',
+    施行日期: '2025-01-01',
+    现行状态: '现行',
+    备注: '',
+  }])
+
+  const summary = validateLegalClauseCsvText(csv)
+  assert.equal(summary.passed, true)
+})
+
+test('正式 CSV 刷新导入前会归档同名旧知识文档和旧条文', async () => {
+  const csv = stringifyCsv([{
+    分类: '消防安全',
+    法规名称: '手提式灭火器',
+    '文号/标准号': 'GB 4351-2023',
+    条款号: '5.1',
+    条文内容: '灭火器应符合对应配置和使用要求。',
+    关键词: '灭火器,配置',
+    官方来源URL: 'https://openstd.samr.gov.cn/example',
+    发布机关: '国家市场监督管理总局、国家标准化管理委员会',
+    施行日期: '2025-01-01',
+    现行状态: '现行',
+    备注: '',
+  }])
+
+  let archivedKnowledgeIds = []
+  let archivedClauseIds = []
+  let createdClause = null
+  patch(knowledgeCategoryDal, 'findAll', async () => ([{ id: 5, name: '消防安全' }]))
+  patch(knowledgeDal, 'findActiveByTitles', async (titles) => {
+    assert.deepEqual(titles, ['手提式灭火器'])
+    return [{ id: 8, title: '手提式灭火器', clause_count: 3 }]
+  })
+  patch(knowledgeClauseDal, 'archiveByKnowledgeIds', async (ids) => { archivedClauseIds = ids })
+  patch(knowledgeDal, 'archiveMany', async (ids) => { archivedKnowledgeIds = ids })
+  patch(knowledgeClauseDal, 'findDuplicate', async () => null)
+  patch(knowledgeDal, 'findBySourceIdentity', async () => null)
+  patch(knowledgeDal, 'create', async () => 18)
+  patch(knowledgeCategoryRelationDal, 'replaceByKnowledgeId', async () => undefined)
+  patch(knowledgeClauseDal, 'create', async (knowledgeId, clause) => {
+    createdClause = { knowledgeId, clause }
+    return 28
+  })
+
+  try {
+    const summary = await importCsvText(csv, { refreshOfficialSources: true })
+    assert.deepEqual(archivedKnowledgeIds, [8])
+    assert.deepEqual(archivedClauseIds, [8])
+    assert.equal(summary.archived_knowledge, 1)
+    assert.equal(summary.archived_clauses, 3)
+    assert.equal(summary.imported_clauses, 1)
+    assert.equal(createdClause.clause.current_status, '现行')
+  } finally {
+    restorePatches()
+  }
 })

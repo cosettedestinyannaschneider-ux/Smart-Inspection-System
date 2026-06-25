@@ -6,6 +6,8 @@ const {
 } = require('./legalClauseImportService')
 const { LEGAL_KNOWLEDGE_CATEGORY_NAMES } = require('../common/legalKnowledgeTaxonomy')
 
+const CURRENT_STATUS_VALUES = new Set(['现行有效', '现行', '已废止', '已修订', '征求意见', '未知'])
+
 /** 创建法规条文 CSV 校验问题 */
 const createIssue = (level, row, field, message) => ({
   level,
@@ -66,6 +68,7 @@ const validateLegalClauseCsvText = (text) => {
     const clauseNo = record['条款号']
     const content = record['条文内容']
     const sourceUrl = record['官方来源URL']
+    const currentStatus = record['现行状态']
 
     if (!LEGAL_KNOWLEDGE_CATEGORY_NAMES.has(category)) {
       issues.push(createIssue('error', row, '分类', `分类必须属于固定 14 类：${category || '空'}`))
@@ -74,6 +77,9 @@ const validateLegalClauseCsvText = (text) => {
     if (!sourceCode) issues.push(createIssue('error', row, '文号/标准号', '文号/标准号不能为空'))
     if (!clauseNo) issues.push(createIssue('error', row, '条款号', '条款号不能为空'))
     if (!content) issues.push(createIssue('error', row, '条文内容', '条文内容不能为空'))
+    if (!currentStatus || !CURRENT_STATUS_VALUES.has(currentStatus)) {
+      issues.push(createIssue('error', row, '现行状态', '现行状态必须为：现行有效、现行、已废止、已修订、征求意见、未知'))
+    }
     if (!isOfficialUrlValid(sourceUrl)) {
       issues.push(createIssue('error', row, '官方来源URL', '官方来源 URL 必须为 http/https，且不得使用 local://'))
     }

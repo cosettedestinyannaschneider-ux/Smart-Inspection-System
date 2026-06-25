@@ -6,6 +6,15 @@ const { hazardRuleService, HAZARD_LEVELS } = require('./hazardRuleService')
 
 const INSUFFICIENT_LEVELS = new Set(['疑似隐患', '疑似重大隐患', '需人工复核'])
 const DRAFT_REVIEW_STATUSES = new Set(['pending', 'approved', 'rejected'])
+const NON_ACTIONABLE_CLAUSE_PATTERNS = [
+  /为了.*制定/,
+  /适用.*规定/,
+  /本法所称/,
+  /本标准规定/,
+  /术语和定义/,
+  /坚持.*方针/,
+  /工作.*原则/,
+]
 
 /** 创建规则草稿业务异常，供路由层统一转换错误码 */
 const draftError = (message) => {
@@ -89,6 +98,17 @@ const normalizeDraftClauseIds = (value, selectedIds = []) => {
   const allowed = new Set(selectedIds.map(Number))
   const ids = normalizeClauseIds(value).filter((id) => allowed.has(Number(id)))
   return ids.length ? ids : selectedIds
+}
+
+/** 判断所选条文是否明显偏总则/术语，避免 AI 被迫生成无法落地的图片规则 */
+const ensureActionableClauses = (clauses = []) => {
+  const actionable = clauses.filter((clause) => {
+    const text = `${clause.clause_no || ''} ${clause.content || ''}`
+    return !NON_ACTIONABLE_CLAUSE_PATTERNS.some((pattern) => pattern.test(text))
+  })
+  if (!actionable.length) {
+    throw draftError('所选条文偏原则性，不适合生成图片可见隐患规则，请选择具体检查要求、禁止行为、技术指标或判定条款。')
+  }
 }
 
 /** 归一化单条规则草稿，保证进入草稿池前字段完整 */
@@ -217,6 +237,7 @@ const hazardRuleDraftService = {
   /** 使用 AI 根据已校验条文生成候选规则草稿 */
   async generate(payload = {}, adminId = null) {
     const clauses = await ensureVerifiedClauses(payload.clause_ids ?? payload.clauseIds)
+    ensureActionableClauses(clauses)
     const selectedClauseIds = clauses.map((item) => Number(item.id))
     const categoryId = resolveDefaultCategoryId(clauses, payload.category_id)
     const category = await ensureCategoryExists(categoryId)

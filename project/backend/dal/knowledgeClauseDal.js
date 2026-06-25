@@ -1,4 +1,7 @@
 const db = require('./db')
+const { ACTIVE_LEGAL_CLAUSE_STATUSES } = require('../common/legalClauseStatus')
+
+const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_LEGAL_CLAUSE_STATUSES.map(() => '?').join(', ')
 
 const CLAUSE_INSERT_SQL = `
   INSERT INTO knowledge_clauses
@@ -181,7 +184,7 @@ const knowledgeClauseDal = {
     return rows
   },
 
-  /** 按 ID 批量查询已校验、现行有效的正式条文 */
+  /** 按 ID 批量查询已校验、现行状态的正式条文 */
   async findVerifiedActiveByIds(ids = []) {
     const clauseIds = Array.from(new Set(
       ids.map((item) => Number(item || 0)).filter((item) => item > 0)
@@ -196,9 +199,9 @@ const knowledgeClauseDal = {
        WHERE kc.id IN (${placeholders})
          AND kc.status = 'active'
          AND kc.verification_status = 'verified'
-         AND kc.current_status = '现行有效'
+         AND kc.current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})
        ORDER BY kc.source_title ASC, kc.sort ASC, kc.id ASC`,
-      clauseIds
+      [...clauseIds, ...ACTIVE_LEGAL_CLAUSE_STATUSES]
     )
     return rows
   },

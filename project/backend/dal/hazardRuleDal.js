@@ -1,4 +1,7 @@
 const db = require('./db')
+const { ACTIVE_LEGAL_CLAUSE_STATUSES } = require('../common/legalClauseStatus')
+
+const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_LEGAL_CLAUSE_STATUSES.map(() => '?').join(', ')
 
 const ALLOWED_RULE_UPDATE_COLUMNS = new Set([
   'seed_key',
@@ -29,6 +32,28 @@ const mapRuleRow = (row = {}) => ({
   is_active: Number(row.is_active || 0) === 1,
   clause_ref_count: Number(row.clause_ref_count || 0),
 })
+
+/** 对条文进行种子规则关联排序：优先标准/判定文件、可执行义务、关键词命中多、条文更短更具体 */
+const rankSeedClause = (row = {}, keywords = [], preferredSources = []) => {
+  const haystack = [
+    row.source_title,
+    row.source_code,
+    row.clause_no,
+    row.content,
+    row.keywords,
+  ].join(' ')
+  const keywordScore = keywords.reduce((score, keyword) => (
+    haystack.includes(keyword) ? score + 2 : score
+  ), 0)
+  const preferredSourceScore = preferredSources.some((source) => (
+    haystack.includes(source)
+  )) ? 10 : 0
+  const standardScore = /GB\s*\d+|重大.*判定|标准|规范|规则/i.test(haystack) ? 4 : 0
+  const actionableScore = /应当|必须|不得|禁止|严禁|应|需|佩戴|设置|配备|保持|检查|检验|维护/.test(haystack) ? 6 : 0
+  const nonActionablePenalty = /范围|规范性引用文件|术语和定义|分类与标记|本标准规定|^[^\n]*(shell|headband|top reinforcement|harness|sweatband)/i.test(haystack) ? 8 : 0
+  const lengthPenalty = Math.min(Math.floor(String(row.content || '').length / 180), 3)
+  return preferredSourceScore + standardScore + actionableScore + keywordScore - nonActionablePenalty - lengthPenalty
+}
 
 /** 查询规则关联的法规条款快照 */
 const findRefsByRuleIds = async (ruleIds = []) => {
@@ -247,7 +272,7 @@ const hazardRuleDal = {
     )
   },
 
-  /** 仅查询已校验、现行有效、未归档条款，保证规则引用来源可靠 */
+  /** 仅查询已校验、现行状态、未归档条款，保证规则引用来源可靠 */
   async findVerifiedClausesByIds(ids = []) {
     const clauseIds = Array.from(new Set(
       ids.map((item) => Number(item || 0)).filter((item) => item > 0)
@@ -261,8 +286,8 @@ const hazardRuleDal = {
        WHERE id IN (${placeholders})
          AND status = 'active'
          AND verification_status = 'verified'
-         AND current_status = '现行有效'`,
-      clauseIds
+         AND current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})`,
+      [...clauseIds, ...ACTIVE_LEGAL_CLAUSE_STATUSES]
     )
     return rows
   },
@@ -272,9 +297,9 @@ const hazardRuleDal = {
     const where = [
       'kc.status = \'active\'',
       'kc.verification_status = \'verified\'',
-      'kc.current_status = \'现行有效\'',
+      `kc.current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})`,
     ]
-    const params = []
+    const params = [...ACTIVE_LEGAL_CLAUSE_STATUSES]
     if (category_id) {
       where.push('kc.category_id = ?')
       params.push(Number(category_id))
@@ -341,21 +366,36 @@ const hazardRuleDal = {
       .filter((rule) => rule.clause_refs.length > 0)
   },
   /** 种子规则按关键词匹配本地已校验条款 */
-  async searchVerifiedClausesForSeed({ category_id = null, keywords = [], limit = 5 } = {}) {
+  async searchVerifiedClausesForSeed({
+    category_id = null,
+    category_ids = [],
+    keywords = [],
+    required_keywords = [],
+    preferred_sources = [],
+    limit = 2,
+  } = {}) {
     const cleanedKeywords = Array.from(new Set(
       keywords.map((item) => String(item || '').trim()).filter((item) => item.length >= 2)
     )).slice(0, 12)
+    const requiredKeywords = Array.from(new Set(
+      required_keywords.map((item) => String(item || '').trim()).filter((item) => item.length >= 2)
+    )).slice(0, 6)
     if (!cleanedKeywords.length) return []
 
     const where = [
       'kc.status = \'active\'',
       'kc.verification_status = \'verified\'',
-      'kc.current_status = \'现行有效\'',
+      `kc.current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})`,
     ]
-    const params = []
-    if (category_id) {
-      where.push('(kc.category_id = ? OR rel.category_id = ?)')
-      params.push(Number(category_id), Number(category_id))
+    const params = [...ACTIVE_LEGAL_CLAUSE_STATUSES]
+    const categoryIds = Array.from(new Set([
+      Number(category_id || 0),
+      ...category_ids.map((item) => Number(item || 0)),
+    ].filter((item) => item > 0)))
+    if (categoryIds.length) {
+      const categoryPlaceholders = categoryIds.map(() => '?').join(', ')
+      where.push(`(kc.category_id IN (${categoryPlaceholders}) OR rel.category_id IN (${categoryPlaceholders}))`)
+      params.push(...categoryIds, ...categoryIds)
     }
 
     const keywordParts = []
@@ -372,17 +412,38 @@ const hazardRuleDal = {
     })
     where.push(`(${keywordParts.join(' OR ')})`)
 
-    const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 20))
+    requiredKeywords.forEach((keyword) => {
+      const likeValue = `%${keyword}%`
+      where.push(`(
+        kc.source_title LIKE ?
+        OR kc.source_code LIKE ?
+        OR kc.clause_no LIKE ?
+        OR kc.content LIKE ?
+        OR kc.keywords LIKE ?
+      )`)
+      params.push(likeValue, likeValue, likeValue, likeValue, likeValue)
+    })
+
+    const preferredSources = Array.from(new Set(
+      preferred_sources.map((item) => String(item || '').trim()).filter(Boolean)
+    )).slice(0, 8)
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 2, 5))
     const [rows] = await db.execute(
       `SELECT DISTINCT kc.*
        FROM knowledge_clauses kc
        LEFT JOIN knowledge_category_relations rel ON rel.knowledge_id = kc.knowledge_id
        WHERE ${where.join(' AND ')}
        ORDER BY kc.sort ASC, kc.id ASC
-       LIMIT ${safeLimit}`,
+       LIMIT 40`,
       params
     )
     return rows
+      .map((row) => ({
+        ...row,
+        _seed_score: rankSeedClause(row, cleanedKeywords, preferredSources),
+      }))
+      .sort((a, b) => b._seed_score - a._seed_score || String(a.source_title || '').localeCompare(String(b.source_title || ''), 'zh-Hans-CN') || Number(a.sort || 0) - Number(b.sort || 0) || Number(a.id) - Number(b.id))
+      .slice(0, safeLimit)
   },
 
   /** 事务内替换规则条款关联 */

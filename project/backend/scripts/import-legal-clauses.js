@@ -3,12 +3,14 @@ const db = require('../dal/db')
 const schemaInit = require('../dal/schemaInit')
 const { importCsvFile } = require('../bll/legalClauseImportService')
 const { validateLegalClauseCsvFile } = require('../bll/legalClauseValidationService')
+const { resolveInputPath } = require('./resolve-input-path')
 
 /** 命令行导入法规条文 CSV，默认导入仓库内演示种子数据 */
 const main = async () => {
-  const inputPath = process.argv[2]
-    ? path.resolve(process.argv[2])
-    : path.resolve(__dirname, '../../database/legal_clause_seed.csv')
+  const inputPath = resolveInputPath(
+    process.argv[2],
+    path.resolve(__dirname, '../../database/legal_clause_seed.csv'),
+  )
 
   const validation = validateLegalClauseCsvFile(inputPath)
   if (!validation.passed) {
@@ -24,7 +26,10 @@ const main = async () => {
     }, null, 2))
   }
   await schemaInit.init()
-  const summary = await importCsvFile(inputPath)
+  const isOfficialDataset = path.basename(inputPath) === 'legal_clause_official.csv'
+  const summary = await importCsvFile(inputPath, {
+    refreshOfficialSources: isOfficialDataset,
+  })
   console.log(JSON.stringify(summary, null, 2))
 
   if (summary.failed_rows.length) {

@@ -12,7 +12,7 @@ const { resolveUploadAbsolutePath } = require('../common/fileAccess')
 const { isLegalKnowledgeCategoryName } = require('../common/legalKnowledgeTaxonomy')
 
 const DOCUMENT_TYPES = new Set(['法律', '行政法规', '部门规章', '规范性文件', '国家标准', '行业标准', '地方标准', '团体标准', '其他'])
-const CURRENT_STATUSES = new Set(['现行有效', '已废止', '已修订', '征求意见', '未知'])
+const CURRENT_STATUSES = new Set(['现行有效', '现行', '已废止', '已修订', '征求意见', '未知'])
 const VERIFICATION_STATUSES = new Set(['pending', 'verified', 'rejected'])
 const DRAFT_REVIEW_STATUSES = new Set(['pending', 'approved', 'rejected'])
 

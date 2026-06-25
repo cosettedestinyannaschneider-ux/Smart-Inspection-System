@@ -35,7 +35,7 @@ const REQUIRED_HEADERS = [
 ]
 
 const DOCUMENT_TYPE_VALUES = new Set(['法律', '行政法规', '部门规章', '规范性文件', '国家标准', '行业标准', '地方标准', '团体标准', '其他'])
-const CURRENT_STATUS_VALUES = new Set(['现行有效', '已废止', '已修订', '征求意见', '未知'])
+const CURRENT_STATUS_VALUES = new Set(['现行有效', '现行', '已废止', '已修订', '征求意见', '未知'])
 
 /** 创建法规导入异常，便于路由层返回明确错误 */
 const importError = (message) => {
@@ -115,6 +115,11 @@ const parseCsvRecords = (text) => {
     return record
   })
 }
+
+/** 提取 CSV 中出现的法规/标准名称，用于正式数据刷新前归档旧版本 */
+const extractSourceTitles = (records = []) => Array.from(new Set(
+  records.map((record) => String(record['法规名称'] || '').trim()).filter(Boolean)
+))
 
 /** 归一化日期，仅接受 YYYY-MM-DD */
 const normalizeDate = (value) => {
@@ -232,7 +237,7 @@ const ensureKnowledgeDocument = async (normalized, categoryId) => {
 }
 
 /** 导入 CSV 文本 */
-const importCsvText = async (text) => {
+const importCsvText = async (text, options = {}) => {
   const records = parseCsvRecords(text)
   const categoryMap = await loadCategoryMap()
   const summary = {
@@ -240,7 +245,21 @@ const importCsvText = async (text) => {
     imported_clauses: 0,
     skipped_duplicates: 0,
     created_knowledge: 0,
+    archived_knowledge: 0,
+    archived_clauses: 0,
     failed_rows: [],
+  }
+
+  if (options.refreshOfficialSources) {
+    const titles = extractSourceTitles(records)
+    const existingDocs = await knowledgeDal.findActiveByTitles(titles)
+    const existingIds = existingDocs.map((item) => Number(item.id)).filter(Boolean)
+    if (existingIds.length) {
+      await knowledgeClauseDal.archiveByKnowledgeIds(existingIds)
+      await knowledgeDal.archiveMany(existingIds)
+      summary.archived_knowledge = existingIds.length
+      summary.archived_clauses = existingDocs.reduce((total, item) => total + Number(item.clause_count || 0), 0)
+    }
   }
 
   for (const record of records) {
@@ -293,10 +312,10 @@ const importCsvText = async (text) => {
 }
 
 /** 从文件路径导入 CSV */
-const importCsvFile = async (filePath) => {
+const importCsvFile = async (filePath, options = {}) => {
   const absolutePath = path.resolve(filePath)
   if (!fs.existsSync(absolutePath)) throw importError(`CSV 文件不存在：${absolutePath}`)
-  return await importCsvText(fs.readFileSync(absolutePath, 'utf8'))
+  return await importCsvText(fs.readFileSync(absolutePath, 'utf8'), options)
 }
 
 module.exports = {
@@ -304,6 +323,7 @@ module.exports = {
   LEGAL_CLAUSE_IMPORT_HEADER_ALIASES,
   stringifyCsv,
   parseCsvRecords,
+  extractSourceTitles,
   importCsvText,
   importCsvFile,
 }

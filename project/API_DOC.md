@@ -547,8 +547,9 @@ Authorization: Bearer <access_token>
 - `knowledge.parse_message` 记录跳过原因或失败原因，便于管理员复核
 - CSV 导入模板位于 `project/database/legal_clause_import_template.csv`，演示种子位于 `project/database/legal_clause_seed.csv`，第一批正式法规标准条文位于 `project/database/legal_clause_official.csv`
 - CSV 导入字段固定为：分类、法规名称、文号/标准号、条款号、条文内容、关键词、官方来源URL、发布机关、施行日期、现行状态、备注
-- CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入正式 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过。命令行导入前会自动执行质量校验，阻断缺表头、非法分类、`local://` 来源、必填字段缺失和 CSV 内重复条款
+- CSV 导入会自动创建或复用 `knowledge` 文档记录，并追加写入正式 `knowledge_clauses`；重复条款按“法规名称 + 文号/标准号 + 条款号 + 条文内容”识别并跳过。命令行导入前会自动执行质量校验，阻断缺表头、非法分类、非法现行状态、`local://` 来源、必填字段缺失和 CSV 内重复条款
 - 命令行校验正式 CSV：`npm --prefix project/backend run validate:legal-clauses`；命令行导入演示种子：`npm --prefix project/backend run import:legal-clauses`；导入正式 CSV：`npm --prefix project/backend run import:legal-clauses -- project/database/legal_clause_official.csv`
+- 命令行导入 `legal_clause_official.csv` 时会按 CSV 内法规/标准名称归档同名旧知识文档和旧条文，再写入正式版本，避免旧“文件版本”条文与正式文号条文并存；管理端上传 CSV 保持追加导入，不自动归档其它来源。
 - 覆盖率接口按 14 类返回法规文件数、条文数、已校验条文数、未校验条文数和可用状态；空知识库时前端必须提示只能进行图片事实识别，不能出具法规判断
 - 覆盖率接口的 `summary.knowledge_count` 和 `summary.clause_count` 为全库唯一计数；分类卡片按适用分类统计，同一份通用法规关联多个分类时会分别体现到各分类
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
@@ -557,8 +558,9 @@ Authorization: Bearer <access_token>
 
 AI 规则草稿约束：
 
-- 草稿只能由管理员基于已校验且现行有效的正式条文生成。
+- 草稿只能由管理员基于已校验且现行状态的正式条文生成；法律法规通常为 `现行有效`，国家标准可为 `现行`。
 - AI 返回的 `clause_ids` 必须真实存在且属于管理员选择的条文范围。
+- 所选条文若明显属于总则、目的、适用范围、术语等原则性内容，后端会提示管理员改选具体检查要求、禁止行为、技术指标或判定条款。
 - 草稿默认 `review_status=pending`，不会参与图片隐患正式判定。
 - 审核通过后只生成未启用正式规则，管理员仍需检查后手动启用。
 - 审核驳回后仅保留草稿记录，不写入正式规则库。
@@ -568,10 +570,10 @@ AI 规则草稿约束：
 - 规则库用于把正式法规条文转化为可执行的隐患判定规则；AI 后续只在启用规则内做受控匹配。
 - `hazard_level` 当前取值：`未发现明显隐患`、`一般隐患`、`疑似重大隐患`、`重大隐患`、`需人工复核`。
 - `insufficient_evidence_level` 当前取值：`疑似隐患`、`疑似重大隐患`、`需人工复核`。
-- 新增或编辑规则时，只允许关联 `knowledge_clauses.verification_status = verified` 且 `current_status = 现行有效` 的正式条文。
+- 新增或编辑规则时，只允许关联 `knowledge_clauses.verification_status = verified` 且 `current_status` 为 `现行有效` 或 `现行` 的正式条文。
 - 未启用规则可作为草稿暂存；任何启用规则都必须至少关联 1 条已校验正式条文，否则后端拒绝启用。
 - 归档规则会同时退出后续判定候选；删除语义采用归档优先，不做物理删除。
-- 内置种子规则覆盖消防通道、安全出口、消防设施器材、灭火器、应急照明、防火门、安全帽、高处作业、有限空间、特种设备等高频场景；导入时按本地已校验条文匹配依据，找不到依据的种子规则会跳过，不会强行启用。
+- 内置种子规则覆盖消防通道、安全出口、消防设施器材、灭火器、应急照明、防火门、安全帽、高处作业、有限空间、特种设备等高频场景；导入时优先匹配 GB 标准、判定规则等更具体依据，每条种子规则默认只绑定 1-2 条主依据，找不到依据的种子规则会跳过，不会强行启用。
 知识列表页面需要的返回字段：
 
 ```json
