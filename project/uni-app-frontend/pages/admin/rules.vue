@@ -6,6 +6,8 @@
         <text class="heading-description">维护“法规条文 → 隐患等级 → 整改建议”的人工规则，后续 AI 只在启用规则内做受控匹配。</text>
       </view>
       <view class="page-action-row">
+        <view class="secondary-btn" @click="openDraftList">规则草稿</view>
+        <view class="secondary-btn" @click="openGenerateDrafts">AI 生成草稿</view>
         <view class="secondary-btn" @click="importSeedRules">导入种子规则</view>
         <view class="primary-btn" @click="openCreate">新增规则</view>
       </view>
@@ -27,6 +29,10 @@
       <view class="summary-card">
         <text class="summary-value blue">{{ referencedCount }}</text>
         <text class="summary-label">已有依据</text>
+      </view>
+      <view class="summary-card">
+        <text class="summary-value purple">{{ pendingDraftCount }}</text>
+        <text class="summary-label">待审核草稿</text>
       </view>
     </view>
 
@@ -78,12 +84,111 @@
       <text class="empty-description">请先导入正式法规条文并完成校验，再新增规则或导入种子规则。</text>
     </view>
 
+    <view v-if="showGenerateModal" class="modal-mask" @click="closeGenerateModal">
+      <view class="modal-panel" @click.stop="">
+        <view class="modal-header">
+          <view>
+            <text class="modal-title">AI 生成规则草稿</text>
+            <text class="modal-description">请选择已校验且现行有效的法规条文。AI 只生成草稿，不能直接启用正式规则。</text>
+          </view>
+          <text class="modal-close" @click="closeGenerateModal">×</text>
+        </view>
+        <scroll-view scroll-y class="modal-body">
+          <view class="form-item full">
+            <text class="form-label">补充要求</text>
+            <textarea v-model="draftInstruction" class="form-textarea" maxlength="1000" placeholder="可选，例如：优先生成图片可见事实能判断的规则" />
+          </view>
+          <view class="clause-section generate-clause-section">
+            <view class="section-head">
+              <view>
+                <text class="section-title">选择法规条文</text>
+                <text class="section-desc">草稿只能引用这里选中的条文，后端会再次校验条文状态。</text>
+              </view>
+              <view class="mini-btn" @click="searchGenerateClauses">搜索条文</view>
+            </view>
+            <view class="clause-search-row">
+              <input v-model="generateClauseKeyword" class="form-input" placeholder="输入法规名称、条款号或关键词" @confirm="searchGenerateClauses" />
+            </view>
+            <view v-if="selectedGenerateClauses.length" class="selected-clause-list">
+              <view v-for="clause in selectedGenerateClauses" :key="clause.id" class="selected-clause">
+                <view>
+                  <text class="selected-title">{{ clause.source_title }}</text>
+                  <text class="selected-meta">{{ clause.source_code || '未标注文号' }} · {{ clause.clause_no || '未标注条款号' }}</text>
+                </view>
+                <text class="remove-link" @click="removeGenerateClause(clause)">移除</text>
+              </view>
+            </view>
+            <view v-if="generateClauseResults.length" class="clause-result-list">
+              <view v-for="clause in generateClauseResults" :key="clause.id" class="clause-result" @click="addGenerateClause(clause)">
+                <text class="selected-title">{{ clause.source_title }}</text>
+                <text class="selected-meta">{{ clause.source_code || '未标注文号' }} · {{ clause.clause_no || '未标注条款号' }}</text>
+                <text class="clause-content">{{ clause.content }}</text>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+        <view class="modal-footer">
+          <view class="secondary-btn" @click="closeGenerateModal">取消</view>
+          <view class="save-btn" :class="{ disabled: generatingDrafts }" @click="generateDrafts">{{ generatingDrafts ? '生成中...' : '生成草稿' }}</view>
+        </view>
+      </view>
+    </view>
+
+    <view v-if="showDraftModal" class="modal-mask" @click="closeDraftModal">
+      <view class="modal-panel draft-panel" @click.stop="">
+        <view class="modal-header">
+          <view>
+            <text class="modal-title">规则草稿池</text>
+            <text class="modal-description">AI 草稿必须编辑审核，通过后生成未启用的正式规则，再由管理员确认是否启用。</text>
+          </view>
+          <text class="modal-close" @click="closeDraftModal">×</text>
+        </view>
+        <view class="draft-toolbar">
+          <picker :range="draftStatusOptions" range-key="name" @change="changeDraftStatus">
+            <view class="filter-picker">{{ currentDraftStatusName }} ▾</view>
+          </picker>
+          <input v-model="draftFilters.keyword" class="search-input" placeholder="搜索草稿名称、关键词、触发条件" @confirm="fetchDrafts" />
+          <view class="secondary-btn" @click="fetchDrafts">刷新</view>
+        </view>
+        <scroll-view scroll-y class="modal-body draft-list-body">
+          <view v-if="drafts.length" class="draft-list">
+            <view v-for="draft in drafts" :key="draft.id" class="draft-card">
+              <view class="rule-title-row">
+                <text class="rule-title">{{ draft.name }}</text>
+                <text class="level-tag" :class="levelClass(draft.hazard_level)">{{ draft.hazard_level }}</text>
+                <text class="state-tag" :class="draftStatusClass(draft.review_status)">{{ draftStatusText(draft.review_status) }}</text>
+              </view>
+              <view class="rule-meta">
+                <text>{{ draft.category_name || getCategoryName(draft.category_id) }}</text>
+                <text>{{ draft.image_evidence_supported ? '图片可独立判断' : '需补充资料' }}</text>
+                <text>依据 {{ draft.clause_ids.length }} 条</text>
+              </view>
+              <text class="rule-condition">{{ draft.trigger_condition }}</text>
+              <view v-if="draft.clause_refs && draft.clause_refs.length" class="clause-preview">
+                <text v-for="ref in draft.clause_refs.slice(0, 3)" :key="ref.clause_id" class="clause-chip">{{ ref.source_title }} {{ ref.clause_no || '' }}</text>
+              </view>
+              <view class="draft-actions">
+                <text v-if="draft.review_status === 'pending'" class="action-link" @click="openEditDraft(draft)">编辑</text>
+                <text v-if="draft.review_status === 'pending'" class="action-link" @click="approveDraft(draft)">通过</text>
+                <text v-if="draft.review_status === 'pending'" class="action-link danger" @click="rejectDraft(draft)">驳回</text>
+                <text v-if="draft.approved_rule_id" class="draft-approved">已生成规则 #{{ draft.approved_rule_id }}</text>
+              </view>
+            </view>
+          </view>
+          <view v-else class="empty-card compact-empty">
+            <text class="empty-title">暂无规则草稿</text>
+            <text class="empty-description">可从已校验法规条文生成候选规则，再由管理员审核。</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
+
     <view v-if="showModal" class="modal-mask" @click="closeModal">
       <view class="modal-panel" @click.stop="">
         <view class="modal-header">
           <view>
-            <text class="modal-title">{{ form.id ? '编辑规则' : '新增规则' }}</text>
-            <text class="modal-description">启用规则必须关联已校验且现行有效的正式条文；未启用规则可作为草稿暂存。</text>
+            <text class="modal-title">{{ editingDraftId ? '编辑规则草稿' : (form.id ? '编辑规则' : '新增规则') }}</text>
+            <text class="modal-description">{{ editingDraftId ? '草稿修改后仍需管理员通过，才会进入正式规则库。' : '启用规则必须关联已校验且现行有效的正式条文；未启用规则可作为草稿暂存。' }}</text>
           </view>
           <text class="modal-close" @click="closeModal">×</text>
         </view>
@@ -170,7 +275,7 @@
 
         <view class="modal-footer">
           <view class="secondary-btn" @click="closeModal">取消</view>
-          <view class="save-btn" @click="saveRule">{{ form.id ? '保存修改' : '新增规则' }}</view>
+          <view class="save-btn" @click="saveRule">{{ editingDraftId ? '保存草稿' : (form.id ? '保存修改' : '新增规则') }}</view>
         </view>
       </view>
     </view>
@@ -183,13 +288,23 @@ import AdminShell from '../../components/admin/AdminShell.vue'
 import { apiUrl, request, unwrapResponse } from '../../common/api-config'
 
 const rules = ref([])
+const drafts = ref([])
 const categories = ref([])
 const filters = ref({ keyword: '', category_id: 'all', hazard_level: 'all' })
 const showModal = ref(false)
+const showGenerateModal = ref(false)
+const showDraftModal = ref(false)
+const editingDraftId = ref(null)
 const form = ref(createForm())
 const clauseKeyword = ref('')
 const clauseResults = ref([])
 const selectedClauses = ref([])
+const generateClauseKeyword = ref('')
+const generateClauseResults = ref([])
+const selectedGenerateClauses = ref([])
+const draftInstruction = ref('')
+const generatingDrafts = ref(false)
+const draftFilters = ref({ keyword: '', review_status: 'pending' })
 
 const hazardLevelOptions = [
   { key: '一般隐患', name: '一般隐患' },
@@ -197,6 +312,12 @@ const hazardLevelOptions = [
   { key: '重大隐患', name: '重大隐患' },
   { key: '需人工复核', name: '需人工复核' },
   { key: '未发现明显隐患', name: '未发现明显隐患' },
+]
+const draftStatusOptions = [
+  { key: 'pending', name: '待审核' },
+  { key: 'approved', name: '已通过' },
+  { key: 'rejected', name: '已驳回' },
+  { key: 'all', name: '全部草稿' },
 ]
 const insufficientOptions = [
   { key: '需人工复核', name: '需人工复核' },
@@ -211,6 +332,10 @@ const hazardFilterOptions = computed(() => [{ key: 'all', name: '全部等级' }
 const activeCount = computed(() => rules.value.filter((item) => item.is_active).length)
 const strictCount = computed(() => rules.value.filter((item) => ['重大隐患', '疑似重大隐患'].includes(item.hazard_level)).length)
 const referencedCount = computed(() => rules.value.filter((item) => Number(item.clause_ref_count || 0) > 0).length)
+const pendingDraftCount = computed(() => drafts.value.filter((item) => item.review_status === 'pending').length)
+const currentDraftStatusName = computed(() => (
+  draftStatusOptions.find((item) => item.key === draftFilters.value.review_status)?.name || '待审核'
+))
 
 const currentFilterCategoryName = computed(() => (
   categoryOptions.value.find((item) => String(item.id) === String(filters.value.category_id))?.name || '全部分类'
@@ -258,7 +383,7 @@ const postAdmin = async (path, payload = {}) => {
 }
 
 const handleAdminReady = async () => {
-  await Promise.all([fetchCategories(), fetchRules()])
+  await Promise.all([fetchCategories(), fetchRules(), fetchDrafts()])
 }
 
 const fetchCategories = async () => {
@@ -291,6 +416,30 @@ const fetchRules = async () => {
   }
 }
 
+const fetchDrafts = async () => {
+  try {
+    const payload = {
+      keyword: draftFilters.value.keyword,
+      review_status: draftFilters.value.review_status,
+    }
+    const result = await postAdmin('/api/admin/knowledge/rules/drafts/list', payload)
+    drafts.value = Array.isArray(result.data) ? result.data.map(normalizeDraft) : []
+  } catch (error) {
+    drafts.value = []
+    showMessage(error?.message || '草稿加载失败')
+  }
+}
+
+const normalizeDraft = (item = {}) => ({
+  ...item,
+  id: Number(item.id),
+  category_id: item.category_id ? Number(item.category_id) : null,
+  image_evidence_supported: !!item.image_evidence_supported,
+  clause_ids: Array.isArray(item.clause_ids) ? item.clause_ids.map(Number) : [],
+  clause_refs: Array.isArray(item.clause_refs) ? item.clause_refs : [],
+  approved_rule_id: item.approved_rule_id ? Number(item.approved_rule_id) : null,
+})
+
 const normalizeRule = (item = {}) => ({
   ...item,
   id: Number(item.id),
@@ -312,6 +461,12 @@ const changeFilterLevel = (event) => {
   const option = hazardFilterOptions.value[event.detail.value]
   filters.value.hazard_level = option ? option.key : 'all'
   fetchRules()
+}
+
+const changeDraftStatus = (event) => {
+  const option = draftStatusOptions[event.detail.value]
+  draftFilters.value.review_status = option ? option.key : 'pending'
+  fetchDrafts()
 }
 
 const changeFormCategory = (event) => {
@@ -373,6 +528,28 @@ const openEdit = (rule) => {
   showModal.value = true
 }
 
+const openEditDraft = (draft) => {
+  editingDraftId.value = Number(draft.id)
+  form.value = {
+    id: null,
+    name: draft.name,
+    category_id: draft.category_id,
+    hazard_level: draft.hazard_level,
+    visible_fact_keywords: draft.visible_fact_keywords || '',
+    trigger_condition: draft.trigger_condition || '',
+    required_evidence: draft.required_evidence || '',
+    image_evidence_supported: !!draft.image_evidence_supported,
+    insufficient_evidence_level: draft.insufficient_evidence_level || '需人工复核',
+    rectification_template: draft.rectification_template || '',
+    is_active: false,
+  }
+  selectedClauses.value = (draft.clause_refs || []).map((item) => ({ ...item, id: Number(item.clause_id || item.id) }))
+  clauseResults.value = []
+  clauseKeyword.value = ''
+  showDraftModal.value = false
+  showModal.value = true
+}
+
 const closeModal = () => {
   showModal.value = false
   form.value = createForm()
@@ -430,6 +607,118 @@ const archiveRule = (rule) => {
         await fetchRules()
       } catch (error) {
         showMessage(error?.message || '规则归档失败')
+      }
+    },
+  })
+}
+
+const openGenerateDrafts = () => {
+  showGenerateModal.value = true
+  generateClauseKeyword.value = ''
+  generateClauseResults.value = []
+  selectedGenerateClauses.value = []
+  draftInstruction.value = ''
+}
+
+const closeGenerateModal = () => {
+  showGenerateModal.value = false
+  generatingDrafts.value = false
+}
+
+const openDraftList = async () => {
+  showDraftModal.value = true
+  await fetchDrafts()
+}
+
+const closeDraftModal = () => {
+  showDraftModal.value = false
+}
+
+const searchGenerateClauses = async () => {
+  try {
+    const response = await postAdmin('/api/admin/knowledge/rules/search-clauses', {
+      keyword: generateClauseKeyword.value,
+      limit: 30,
+    })
+    generateClauseResults.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    generateClauseResults.value = []
+    showMessage(error?.message || '条文搜索失败')
+  }
+}
+
+const addGenerateClause = (clause) => {
+  if (selectedGenerateClauses.value.some((item) => Number(item.id) === Number(clause.id))) {
+    showMessage('该条文已选择')
+    return
+  }
+  selectedGenerateClauses.value.push(clause)
+}
+
+const removeGenerateClause = (clause) => {
+  selectedGenerateClauses.value = selectedGenerateClauses.value.filter((item) => Number(item.id) !== Number(clause.id))
+}
+
+const generateDrafts = async () => {
+  if (generatingDrafts.value) return
+  const clauseIds = selectedGenerateClauses.value.map((item) => Number(item.id)).filter(Boolean)
+  if (!clauseIds.length) {
+    showMessage('请先选择法规条文')
+    return
+  }
+  generatingDrafts.value = true
+  try {
+    const response = await postAdmin('/api/admin/knowledge/rules/drafts/generate', {
+      clause_ids: clauseIds,
+      instruction: draftInstruction.value,
+    })
+    const count = Array.isArray(response.data) ? response.data.length : 0
+    showMessage(`已生成 ${count} 条草稿`, 'success')
+    closeGenerateModal()
+    showDraftModal.value = true
+    await fetchDrafts()
+  } catch (error) {
+    showMessage(error?.message || '草稿生成失败')
+  } finally {
+    generatingDrafts.value = false
+  }
+}
+
+const draftStatusText = (status) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' }[status] || '未知')
+const draftStatusClass = (status) => ({ active: status === 'approved', rejected: status === 'rejected', pending: status === 'pending' })
+
+const approveDraft = (draft) => {
+  uni.showModal({
+    title: '通过草稿',
+    content: '通过后会生成一条未启用的正式规则，管理员仍需检查后再启用。',
+    success: async (result) => {
+      if (!result.confirm) return
+      try {
+        await postAdmin('/api/admin/knowledge/rules/drafts/approve', { id: draft.id })
+        showMessage('草稿已通过', 'success')
+        await Promise.all([fetchDrafts(), fetchRules()])
+      } catch (error) {
+        showMessage(error?.message || '草稿通过失败')
+      }
+    },
+  })
+}
+
+const rejectDraft = (draft) => {
+  uni.showModal({
+    title: '驳回草稿',
+    content: `确定驳回“${draft.name}”吗？`,
+    success: async (result) => {
+      if (!result.confirm) return
+      try {
+        await postAdmin('/api/admin/knowledge/rules/drafts/reject', {
+          id: draft.id,
+          review_note: '管理员驳回',
+        })
+        showMessage('草稿已驳回', 'success')
+        await fetchDrafts()
+      } catch (error) {
+        showMessage(error?.message || '草稿驳回失败')
       }
     },
   })
@@ -505,14 +794,39 @@ const removeClause = (clause) => {
   box-sizing: border-box;
 }
 .primary-btn, .save-btn { background: #1677ff; color: #fff; }
+.save-btn.disabled { opacity: .6; pointer-events: none; }
 .secondary-btn, .mini-btn { background: #f1f4f8; color: #506070; }
-.summary-grid { margin-bottom: 14px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.summary-grid { margin-bottom: 14px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .summary-card { padding: 16px; background: #fff; border: 1px solid #edf1f7; border-radius: 10px; }
 .summary-value { display: block; color: #1677ff; font-size: 24px; font-weight: 700; }
 .summary-value.green { color: #18a66c; }
 .summary-value.orange { color: #d97706; }
 .summary-value.blue { color: #2563eb; }
+.summary-value.purple { color: #7c3aed; }
 .summary-label { display: block; margin-top: 5px; color: #8b98aa; font-size: 12px; }
+.draft-toolbar {
+  padding: 12px 18px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid #edf1f7;
+  background: #fff;
+}
+.draft-panel { width: min(980px, 94vw); }
+.draft-list-body { max-height: calc(88vh - 150px); }
+.draft-list { display: flex; flex-direction: column; gap: 10px; }
+.draft-card {
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #edf1f7;
+  border-radius: 10px;
+}
+.draft-actions { margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+.draft-approved { color: #718096; font-size: 12px; }
+.state-tag.rejected { background: #fff1f0; color: #d93025; }
+.state-tag.pending { background: #fff8e6; color: #b7791f; }
+.compact-empty { border: 0; background: #f8fafc; }
+.generate-clause-section { margin-top: 14px; }
 .toolbar-card {
   margin-bottom: 14px;
   padding: 12px;

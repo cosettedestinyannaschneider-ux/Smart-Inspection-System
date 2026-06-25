@@ -181,6 +181,28 @@ const knowledgeClauseDal = {
     return rows
   },
 
+  /** 按 ID 批量查询已校验、现行有效的正式条文 */
+  async findVerifiedActiveByIds(ids = []) {
+    const clauseIds = Array.from(new Set(
+      ids.map((item) => Number(item || 0)).filter((item) => item > 0)
+    ))
+    if (!clauseIds.length) return []
+
+    const placeholders = clauseIds.map(() => '?').join(', ')
+    const [rows] = await db.execute(
+      `SELECT kc.*, c.name AS category_name
+       FROM knowledge_clauses kc
+       LEFT JOIN knowledge_categories c ON c.id = kc.category_id
+       WHERE kc.id IN (${placeholders})
+         AND kc.status = 'active'
+         AND kc.verification_status = 'verified'
+         AND kc.current_status = '现行有效'
+       ORDER BY kc.source_title ASC, kc.sort ASC, kc.id ASC`,
+      clauseIds
+    )
+    return rows
+  },
+
   /**
    * 按关键词检索可用于报告引用的本地知识条款。
    * 当前阶段采用 MySQL LIKE 检索，避免引入向量库或复杂 RAG 链路。

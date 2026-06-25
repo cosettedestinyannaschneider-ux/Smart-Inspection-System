@@ -504,6 +504,11 @@ Authorization: Bearer <access_token>
 | `POST /api/admin/knowledge/rules/toggle` | `id`、`is_active` | 启用或停用规则 |
 | `POST /api/admin/knowledge/rules/archive` | `id` | 归档规则，归档后不参与判定 |
 | `POST /api/admin/knowledge/rules/import-seed` | 无业务参数 | 按本地已校验条文导入高频隐患规则种子包 |
+| `POST /api/admin/knowledge/rules/drafts/list` | `keyword`、`review_status`、`category_id`、`limit` 可选 | 查询 AI 生成的规则草稿池 |
+| `POST /api/admin/knowledge/rules/drafts/generate` | `clause_ids` 必填，`instruction`、`model_id` 可选 | 管理员基于已校验条文生成候选规则草稿 |
+| `POST /api/admin/knowledge/rules/drafts/update` | `id`、规则草稿字段、`clause_ids` | 编辑待审核规则草稿 |
+| `POST /api/admin/knowledge/rules/drafts/approve` | `id`、`review_note` 可选 | 审核通过草稿，并生成未启用的正式规则 |
+| `POST /api/admin/knowledge/rules/drafts/reject` | `id`、`review_note` 可选 | 驳回规则草稿，不进入正式规则库 |
 
 
 #### PR19 规则驱动分析字段
@@ -549,6 +554,14 @@ Authorization: Bearer <access_token>
 - 分类删除前，后端会校验该分类下没有 `status='active'` 的知识文档
 - 知识文档删除语义改为**归档优先**，即将 `status` 更新为 `archived`
 - 当前阶段已完成正式 CSV 条款入库、PDF/DOCX 草稿审核、正式 CSV 数据资产、知识库覆盖率看板和隐患规则库维护；严格 AI 判定链路由后续规则驱动分析 PR 接入
+
+AI 规则草稿约束：
+
+- 草稿只能由管理员基于已校验且现行有效的正式条文生成。
+- AI 返回的 `clause_ids` 必须真实存在且属于管理员选择的条文范围。
+- 草稿默认 `review_status=pending`，不会参与图片隐患正式判定。
+- 审核通过后只生成未启用正式规则，管理员仍需检查后手动启用。
+- 审核驳回后仅保留草稿记录，不写入正式规则库。
 
 隐患规则库管理规则：
 

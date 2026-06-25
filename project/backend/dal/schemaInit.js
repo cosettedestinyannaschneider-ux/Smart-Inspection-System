@@ -922,6 +922,58 @@ const schemaInit = {
   // =========================================================================
   // Step 10: 操作日志表（补字段）
   // =========================================================================
+  // Step 9.9: AI 生成隐患规则草稿表（草稿审核后才进入正式规则库）
+  // =========================================================================
+  async step09HazardRuleDrafts() {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS hazard_rule_drafts (
+        id                          INT           NOT NULL AUTO_INCREMENT,
+        name                        VARCHAR(200)  NOT NULL,
+        category_id                 INT           DEFAULT NULL,
+        hazard_level                VARCHAR(50)   NOT NULL,
+        visible_fact_keywords       VARCHAR(500)  DEFAULT NULL,
+        trigger_condition           TEXT          NOT NULL,
+        required_evidence           TEXT          NOT NULL,
+        image_evidence_supported    TINYINT(1)    NOT NULL DEFAULT 0,
+        insufficient_evidence_level VARCHAR(50)   NOT NULL DEFAULT '需人工复核',
+        rectification_template      TEXT          NOT NULL,
+        clause_ids_json             TEXT          NOT NULL,
+        generation_prompt           MEDIUMTEXT    DEFAULT NULL,
+        ai_raw_response             MEDIUMTEXT    DEFAULT NULL,
+        generated_by                INT           DEFAULT NULL,
+        review_status               VARCHAR(20)   NOT NULL DEFAULT 'pending',
+        review_note                 VARCHAR(1000) DEFAULT NULL,
+        reviewed_by                 INT           DEFAULT NULL,
+        reviewed_at                 DATETIME      DEFAULT NULL,
+        approved_rule_id            INT           DEFAULT NULL,
+        status                      VARCHAR(20)   NOT NULL DEFAULT 'active',
+        created_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at                  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_hrd_category_id (category_id),
+        KEY idx_hrd_review_status (review_status),
+        KEY idx_hrd_generated_by (generated_by),
+        KEY idx_hrd_status (status),
+        KEY idx_hrd_approved_rule_id (approved_rule_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+
+    await this._addIndex('hazard_rule_drafts', 'idx_hrd_category_id', 'KEY idx_hrd_category_id (category_id)')
+    await this._addIndex('hazard_rule_drafts', 'idx_hrd_review_status', 'KEY idx_hrd_review_status (review_status)')
+    await this._addIndex('hazard_rule_drafts', 'idx_hrd_generated_by', 'KEY idx_hrd_generated_by (generated_by)')
+    await this._addIndex('hazard_rule_drafts', 'idx_hrd_status', 'KEY idx_hrd_status (status)')
+    await this._addIndex('hazard_rule_drafts', 'idx_hrd_approved_rule_id', 'KEY idx_hrd_approved_rule_id (approved_rule_id)')
+
+    await this._addFK('hazard_rule_drafts', 'fk_hrd_category',
+      'FOREIGN KEY (category_id) REFERENCES knowledge_categories (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('hazard_rule_drafts', 'fk_hrd_generated_by',
+      'FOREIGN KEY (generated_by) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('hazard_rule_drafts', 'fk_hrd_reviewed_by',
+      'FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE')
+    await this._addFK('hazard_rule_drafts', 'fk_hrd_approved_rule',
+      'FOREIGN KEY (approved_rule_id) REFERENCES hazard_rules (id) ON DELETE SET NULL ON UPDATE CASCADE')
+  },
+  // =========================================================================
   async step10_actionLogs() {
     // 确保表存在
     try {

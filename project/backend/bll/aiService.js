@@ -128,6 +128,21 @@ const normalizeAIResultContent = (content, preferJson = false) => {
   return text
 }
 
+/** 从模型返回中提取 JSON 对象，兼容少量说明文字 */
+const parseJsonFromText = (content) => {
+  const normalized = normalizeAIResultContent(content, false)
+  try {
+    return JSON.parse(normalized)
+  } catch {
+    const start = normalized.indexOf('{')
+    const end = normalized.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      return JSON.parse(normalized.slice(start, end + 1))
+    }
+    throw new Error('AI 返回内容不是合法 JSON')
+  }
+}
+
 const BUSINESS_SCOPE_REFUSAL = '抱歉，我只能协助安全生产检查、隐患图片分析、整改建议、法规标准解释、企业安全管理和报告生成。请补充现场隐患、企业安全管理、法规依据或报告生成相关的问题。'
 
 const BUSINESS_SCOPE_KEYWORDS = [
@@ -495,6 +510,89 @@ ${imageMetaText}
     } catch (apiError) {
       console.error('[AIService] API error:', apiError)
       throw new Error(buildAIServiceErrorMessage(apiError, true))
+    }
+  },
+  /**
+   * 根据已校验法规条文生成隐患规则草稿候选。
+   * AI 只输出草稿，后续仍需管理员审核通过后才进入正式规则库。
+   */
+  async generateHazardRuleDrafts({ clauses = [], category = null, instruction = '', modelId = null } = {}) {
+    const verifiedClauses = Array.isArray(clauses) ? clauses : []
+    if (!verifiedClauses.length) throw new Error('请先选择已校验且现行有效的法规条文')
+
+    const clauseContext = verifiedClauses.map((clause, index) => {
+      const title = clause.source_title || '未命名法规'
+      const code = clause.source_code ? `（${clause.source_code}）` : ''
+      const clauseNo = clause.clause_no || '未标注条款号'
+      const content = String(clause.content || '').replace(/\s+/g, ' ').trim()
+      const keywords = clause.keywords ? `；关键词：${clause.keywords}` : ''
+      return `${index + 1}. clause_id=${Number(clause.id)}；分类=${clause.category_name || category?.name || ''}；《${title}》${code}${clauseNo}：${content}${keywords}`
+    }).join('\n')
+
+    const prompt = `你是安全生产法规规则整理助手。请根据管理员选择的已校验法规条文，生成“隐患判定规则草稿”。
+
+【重要边界】
+1. 只能根据下方提供的条文生成规则，不得编造法规、标准编号、条款号或条文内容。
+2. 只能引用下方出现的 clause_id，不得输出不存在的 clause_id。
+3. 规则只是草稿，不要写“已确认重大隐患”等最终执法结论。
+4. 图片无法独立证明审批、台账、检测、检验状态时，image_evidence_supported 必须为 false，insufficient_evidence_level 应为“需人工复核”或“疑似重大隐患”。
+5. 如果条文只适合做管理要求，请生成“需人工复核”或“一般隐患”规则，不要强行生成重大隐患。
+
+【规则所属分类】
+${category?.name || '未指定分类'}
+
+【管理员补充要求】
+${instruction || '无'}
+
+【可用法规条文】
+${clauseContext}
+
+【返回格式】
+请只返回合法 JSON，不要 Markdown，不要代码块，不要解释文字：
+{
+  "drafts": [
+    {
+      "name": "规则名称，简洁描述可观察隐患",
+      "category_id": ${Number(category?.id || 0) || 'null'},
+      "hazard_level": "一般隐患 | 疑似重大隐患 | 重大隐患 | 需人工复核",
+      "visible_fact_keywords": "用于匹配图片可见事实的关键词，使用中文逗号分隔",
+      "trigger_condition": "触发条件，说明看到什么事实时考虑命中该规则",
+      "required_evidence": "所需证据，区分图片可见证据和需要补充的台账/检测/审批资料",
+      "image_evidence_supported": true,
+      "insufficient_evidence_level": "疑似隐患 | 疑似重大隐患 | 需人工复核",
+      "rectification_template": "整改建议模板，要求可执行、可复查",
+      "clause_ids": [1]
+    }
+  ]
+}
+
+建议输出 1 到 5 条高质量规则。`
+
+    const { client, modelName } = modelId
+      ? await getClientById(modelId)
+      : await getActiveClient()
+
+    console.log(`[AIService] Hazard rule draft generation using model: ${modelName}`)
+    try {
+      const response = await client.chat.completions.create({
+        model: modelName,
+        messages: [
+          { role: 'system', content: C.SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: C.AI_DEFAULT_MAX_TOKENS,
+        temperature: C.AI_INSPECTION_TEMPERATURE,
+      })
+      const raw = normalizeAIResultContent(response.choices[0].message.content, false)
+      const parsed = parseJsonFromText(raw)
+      return {
+        drafts: Array.isArray(parsed.drafts) ? parsed.drafts : [],
+        raw,
+        prompt,
+      }
+    } catch (apiError) {
+      console.error('[AIService] hazard rule draft generation error:', apiError)
+      throw new Error(buildAIServiceErrorMessage(apiError, false))
     }
   },
   /**

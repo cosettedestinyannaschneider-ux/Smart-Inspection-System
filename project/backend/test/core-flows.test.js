@@ -11,6 +11,7 @@ const request = require('supertest')
 const userService = require('../bll/userService')
 const authService = require('../bll/authService')
 const knowledgeService = require('../bll/knowledgeService')
+const { hazardRuleDraftService } = require('../bll/hazardRuleDraftService')
 const modelConfigService = require('../bll/modelConfigService')
 const aiService = require('../bll/aiService')
 const docService = require('../bll/docService')
@@ -21,6 +22,7 @@ const inspectionReportImageDal = require('../dal/inspectionReportImageDal')
 const inspectionReportKnowledgeRefDal = require('../dal/inspectionReportKnowledgeRefDal')
 const inspectionReportRuleRefDal = require('../dal/inspectionReportRuleRefDal')
 const inspectionTaskDal = require('../dal/inspectionTaskDal')
+const sessionDal = require('../dal/sessionDal')
 const logDal = require('../dal/logDal')
 const C = require('../common/Constants')
 const { ErrorCode } = require('../common/ErrorCode')
@@ -167,6 +169,46 @@ const app = (() => {
 
   patch(authService, 'createFileAccessToken', () => 'file-token')
 
+  patch(hazardRuleDraftService, 'list', async () => ([{
+    id: 501,
+    name: 'AI 草稿：消防通道堵塞',
+    category_id: 5,
+    category_name: '消防安全',
+    hazard_level: '一般隐患',
+    visible_fact_keywords: '消防通道,堵塞',
+    trigger_condition: '现场可见消防通道被杂物占用或堵塞。',
+    required_evidence: '图片能显示通道及占用状态。',
+    image_evidence_supported: true,
+    insufficient_evidence_level: '需人工复核',
+    rectification_template: '立即清理占用物，保持消防通道畅通。',
+    clause_ids: [101],
+    clause_refs: [{ clause_id: 101, source_title: '测试法规', clause_no: '第1条' }],
+    review_status: 'pending',
+  }]))
+
+  patch(hazardRuleDraftService, 'generate', async (payload, adminId) => {
+    assert.deepEqual(payload.clause_ids, [101])
+    assert.equal(adminId, fixtures.admin.id)
+    return [{ id: 502, name: 'AI 生成草稿', clause_ids: [101], review_status: 'pending' }]
+  })
+
+  patch(hazardRuleDraftService, 'update', async (payload) => ({
+    id: Number(payload.id),
+    name: payload.name || '更新后的草稿',
+    review_status: 'pending',
+  }))
+
+  patch(hazardRuleDraftService, 'approve', async (payload, reviewerId) => ({
+    draft: { id: Number(payload.id), review_status: 'approved', approved_rule_id: 701 },
+    rule: { id: 701, name: 'AI 草稿转正式规则', is_active: false },
+    reviewer_id: reviewerId,
+  }))
+
+  patch(hazardRuleDraftService, 'reject', async (payload) => ({
+    id: Number(payload.id),
+    review_status: 'rejected',
+  }))
+
   patch(knowledgeService, 'getCoverage', async () => ({
     summary: {
       category_count: 14,
@@ -228,6 +270,8 @@ const app = (() => {
     industry: '工贸行业安全',
   }))
 
+
+  patch(sessionDal, 'bindTask', async () => undefined)
 
   patch(inspectionTaskDal, 'findAccessibleById', async (id, userId, isAdmin = false) => ({
     id: Number(id),
@@ -495,6 +539,60 @@ test('管理员知识库覆盖率接口返回可用性汇总', async () => {
   assert.equal(res.body.data.can_support_formal_assessment, true)
   assert.equal(res.body.data.categories[0].category_name, '消防安全')
   assert.equal(res.body.data.categories[0].coverage_status, 'usable')
+})
+
+test('规则草稿接口缺少管理员身份时拒绝访问', async () => {
+  const res = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/list')
+    .set('Authorization', 'Bearer user-token')
+    .send({})
+    .expect(200)
+
+  assert.equal(res.body.success, false)
+  assert.equal(res.body.code, ErrorCode.ADMIN_REQUIRED)
+})
+
+test('管理员可生成并审核 AI 规则草稿', async () => {
+  const listRes = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/list')
+    .set('Authorization', 'Bearer admin-token')
+    .send({ review_status: 'pending' })
+    .expect(200)
+  assert.equal(listRes.body.code, ErrorCode.SUCCESS)
+  assert.equal(listRes.body.data[0].review_status, 'pending')
+
+  const generateRes = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/generate')
+    .set('Authorization', 'Bearer admin-token')
+    .send({ clause_ids: [101] })
+    .expect(200)
+  assert.equal(generateRes.body.code, ErrorCode.SUCCESS)
+  assert.equal(generateRes.body.data[0].name, 'AI 生成草稿')
+
+  const updateRes = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/update')
+    .set('Authorization', 'Bearer admin-token')
+    .send({ id: 502, name: '更新后的草稿' })
+    .expect(200)
+  assert.equal(updateRes.body.code, ErrorCode.SUCCESS)
+  assert.equal(updateRes.body.name, '更新后的草稿')
+
+  const approveRes = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/approve')
+    .set('Authorization', 'Bearer admin-token')
+    .send({ id: 502 })
+    .expect(200)
+  assert.equal(approveRes.body.code, ErrorCode.SUCCESS)
+  assert.equal(approveRes.body.rule.is_active, false)
+  assert.equal(approveRes.body.draft.approved_rule_id, 701)
+
+  const rejectRes = await request(app)
+    .post('/api/admin/knowledge/rules/drafts/reject')
+    .set('Authorization', 'Bearer admin-token')
+    .send({ id: 503 })
+    .expect(200)
+  assert.equal(rejectRes.body.code, ErrorCode.SUCCESS)
+  assert.equal(rejectRes.body.review_status, 'rejected')
 })
 
 test('受控报告下载缺少鉴权时拒绝访问', async () => {
