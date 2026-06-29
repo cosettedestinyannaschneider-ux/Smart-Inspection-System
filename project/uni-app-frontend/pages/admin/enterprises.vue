@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AdminShell active-key="enterprises" title="企业数据查询" wide @ready="handleAdminReady">
     <!-- 页面标题与导出操作 -->
     <view class="page-heading">
@@ -337,6 +337,30 @@ const formatAssignedInspectors = (item = {}) => {
   const list = Array.isArray(item.assigned_inspectors) ? item.assigned_inspectors.filter((row) => row.status === 'active') : []
   return list.length ? list.map((row) => row.username).join('、') : '未分配'
 }
+
+const confidenceLabel = (value) => ({
+  high: '高可信',
+  medium: '中可信',
+  low: '低可信',
+  non_business: '非业务图片',
+}[String(value || '')] || '待复核')
+
+const basisTypeLabel = (value) => ({
+  local_rule: '本地规则+条文',
+  local_clause: '本地法规参考',
+  ai_fallback: 'AI 低可信参考',
+  external_search: '外部搜索参考',
+  non_business: '非业务图片',
+}[String(value || '')] || '待人工复核')
+
+const reviewStatusLabel = (value) => ({
+  pending: '待确认',
+  confirmed: '已确认',
+  needs_review: '需复核',
+  rejected: '已退回',
+}[String(value || '')] || '待确认')
+
+const confidenceTagClass = (value) => 'confidence-tag-' + String(value || 'low')
 
 /** 根据全部查询条件筛选企业 */
 const filteredList = computed(() => {
@@ -709,3 +733,17 @@ const downloadReport = async (report, format) => {
   .filter-status-selector { min-width: 220rpx; flex: 1; }.selector-options { top: calc(100% + 8rpx); padding: 8rpx 0; border-radius: 13rpx; }.filter-selector-options { min-width: 260rpx; }.selector-option { padding: 20rpx 22rpx; font-size: 22rpx; }
 }
 </style>
+
+
+
+
+.report-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.report-tag { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; font-size: 11px; line-height: 1; background: #eef2f7; color: #526078; }
+.report-tag.basis { background: #f6f7fb; color: #44556c; }
+.report-tag.review { background: #fff7e8; color: #9a6700; }
+.confidence-tag-high { background: #eaf7ef; color: #17835b; }
+.confidence-tag-medium { background: #fff7e8; color: #b7791f; }
+.confidence-tag-low { background: #fff1f0; color: #c2410c; }
+.confidence-tag-non_business { background: #f3f4f6; color: #4b5563; }
+
+

@@ -1,4 +1,4 @@
-const db = require('./db')
+﻿const db = require('./db')
 const C = require('../common/Constants')
 
 const historyDal = {
@@ -9,21 +9,41 @@ const historyDal = {
    * @param {string} result
    * @param {string|null} wordPath
    * @param {string|null} pdfPath
-   * @param {string|null} imagePath  兼容旧单图字段
+   * @param {string|null} imagePath 兼容旧单图字段
    * @param {string|null} sessionId
-   * @param {object}  [opts]         扩展参数
-   * @param {number}  [opts.enterpriseId]
-   * @param {string}  [opts.title]
+   * @param {object} [opts] 扩展参数
    */
   async createHistory(userId, prompt, result, wordPath, pdfPath, imagePath = null, sessionId = null, opts = {}) {
     const [res] = await db.execute(
       `INSERT INTO inspection_reports
-       (user_id, prompt, result, word_path, pdf_path, image_path, session_id, enterprise_id, inspection_task_id, title, review_status, review_required, report_allowed, report_block_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, prompt, result, wordPath, pdfPath, imagePath, sessionId,
-       opts.enterpriseId || null, opts.inspectionTaskId || null, opts.title || null,
-       opts.reviewStatus || C.REPORT_REVIEW_PENDING, opts.reviewRequired ? 1 : 0,
-       opts.reportAllowed === false ? 0 : 1, opts.reportBlockReason || null]
+       (
+         user_id, prompt, result, word_path, pdf_path, image_path, session_id,
+         enterprise_id, inspection_task_id, title,
+         review_status, review_required,
+         report_allowed, report_block_reason,
+         confidence_level, analysis_basis_type, fallback_used, basis_notice
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        prompt,
+        result,
+        wordPath,
+        pdfPath,
+        imagePath,
+        sessionId,
+        opts.enterpriseId || null,
+        opts.inspectionTaskId || null,
+        opts.title || null,
+        opts.reviewStatus || C.REPORT_REVIEW_PENDING,
+        opts.reviewRequired ? 1 : 0,
+        opts.reportAllowed === false ? 0 : 1,
+        opts.reportBlockReason || null,
+        opts.confidenceLevel || 'low',
+        opts.analysisBasisType || 'ai_fallback',
+        opts.fallbackUsed ? 1 : 0,
+        opts.basisNotice || null,
+      ]
     )
     return res.insertId
   },
@@ -99,8 +119,20 @@ const historyDal = {
   async updateResult(id, result, opts = {}) {
     return await db.execute(
       `UPDATE inspection_reports
-       SET result = ?, word_path = ?, pdf_path = ?, review_status = ?, review_required = ?,
-           review_comment = ?, reviewed_by = NULL, reviewed_at = NULL
+       SET result = ?,
+           word_path = ?,
+           pdf_path = ?,
+           review_status = ?,
+           review_required = ?,
+           review_comment = ?,
+           reviewed_by = NULL,
+           reviewed_at = NULL,
+           report_allowed = ?,
+           report_block_reason = ?,
+           confidence_level = ?,
+           analysis_basis_type = ?,
+           fallback_used = ?,
+           basis_notice = ?
        WHERE id = ?`,
       [
         result,
@@ -109,6 +141,12 @@ const historyDal = {
         opts.reviewStatus || C.REPORT_REVIEW_PENDING,
         opts.reviewRequired ? 1 : 0,
         opts.reviewComment || null,
+        opts.reportAllowed === false ? 0 : 1,
+        opts.reportBlockReason || null,
+        opts.confidenceLevel || 'low',
+        opts.analysisBasisType || 'ai_fallback',
+        opts.fallbackUsed ? 1 : 0,
+        opts.basisNotice || null,
         id,
       ]
     )

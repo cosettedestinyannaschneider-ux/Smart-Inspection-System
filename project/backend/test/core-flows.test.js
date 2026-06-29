@@ -317,6 +317,10 @@ const app = (() => {
       reference_standards: [{ name: '测试法规', code: 'GB TEST-2026', clause: '第1条', content: '测试条文内容' }],
       hazard_level: '一般隐患',
       evidence_sufficiency: 'sufficient',
+      confidence_level: 'high',
+      analysis_basis_type: 'local_rule',
+      fallback_used: false,
+      basis_notice: '?????????????????????',
       review_required: false,
       report_allowed: true,
       report_block_reason: '',
@@ -643,6 +647,9 @@ test('POST /api/hazard/analyze 使用 mock AI 保存待确认初判，不直接�
   assert.equal(res.body.wordPath, null)
   assert.equal(res.body.review_status, C.REPORT_REVIEW_PENDING)
   assert.equal(res.body.report_allowed, true)
+  assert.ok(['high', 'medium', 'low', 'non_business'].includes(res.body.confidence_level))
+  assert.ok(['local_rule', 'local_clause', 'ai_fallback', 'external_search', 'non_business'].includes(res.body.analysis_basis_type))
+  assert.ok(typeof res.body.basis_notice === 'string' && res.body.basis_notice.length > 0)
   assert.equal(res.body.knowledge_refs[0].source_title, '测试法规')
   assert.equal(res.body.rule_refs[0].name, '消防通道堵塞')
 })
@@ -702,3 +709,4 @@ test('POST /api/hazard/analyze 普通用户缺少分析权限时拒绝访问', a
   assert.equal(res.body.success, false)
   assert.equal(res.body.code, ErrorCode.PERMISSION_DENIED)
 })
+

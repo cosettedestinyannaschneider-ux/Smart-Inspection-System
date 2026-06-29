@@ -1,4 +1,4 @@
-const db = require('./db')
+﻿const db = require('./db')
 const { hasModelConfigSecret, encryptApiKey } = require('../bll/modelConfigCryptoService')
 const { LEGAL_KNOWLEDGE_CATEGORIES } = require('../common/legalKnowledgeTaxonomy')
 
@@ -450,6 +450,10 @@ const schemaInit = {
         'reviewed_at DATETIME DEFAULT NULL',
         'report_allowed TINYINT(1) NOT NULL DEFAULT 0',
         'report_block_reason VARCHAR(500) DEFAULT NULL',
+        "confidence_level VARCHAR(20) NOT NULL DEFAULT 'low'",
+        "analysis_basis_type VARCHAR(30) NOT NULL DEFAULT 'ai_fallback'",
+        'fallback_used TINYINT(1) NOT NULL DEFAULT 0',
+        'basis_notice VARCHAR(500) DEFAULT NULL',
         'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
       ]) {
         await this._addColumn('inspection_reports', colDef)
@@ -1133,3 +1137,7 @@ const schemaInit = {
 }
 
 module.exports = schemaInit
+
+
+
+
