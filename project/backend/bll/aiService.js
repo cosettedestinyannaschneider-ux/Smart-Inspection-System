@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AI 服务模块
  * 负责对接大模型（豆包/DeepSeek/千问），实现隐患智能分析与会话管理
  *
@@ -12,7 +12,7 @@ const historyDal = require('../dal/historyDal')
 const sessionDal = require('../dal/sessionDal')
 const knowledgeClauseDal = require('../dal/knowledgeClauseDal')
 const modelConfigService = require('./modelConfigService')
-const { hazardAssessmentService } = require('./hazardAssessmentService')
+const { hazardAssessmentService, mergeLowConfidenceFallback } = require('./hazardAssessmentService')
 const C = require('../common/Constants')
 require('dotenv').config()
 
@@ -286,6 +286,64 @@ const buildMessages = async (sessionId, userId, inspectionTaskId = null) => {
   return { messages, sessionId }
 }
 
+/**
+ * 当本地规则和条文都未命中时，基于已抽取的图片事实生成低可信 AI 参考。
+ * 该路径严禁编造法规编号、条款号或重大隐患正式结论。
+ */
+const generateLowConfidenceFallback = async ({ client, modelName, prompt = '', enterprise = null, pendingImages = [] }) => {
+  if (!pendingImages.length) return { items: [], general_suggestions: '' }
+
+  const enterpriseText = enterprise
+    ? `企业信息：${enterprise.name || ''}，行业：${enterprise.industry || ''}，${enterprise.project_name ? '项目：' + enterprise.project_name + '，' : ''}${enterprise.region || ''}${enterprise.address || ''}`
+    : '企业信息：未提供'
+
+  const factLines = pendingImages.map((item) => (
+    `图片${item.image_id}：可见事实=${(item.visible_facts || []).join('；') || '未提取'}；证据不足=${(item.uncertain_points || []).join('；') || '无'}；建议关键词=${(item.suggested_keywords || []).join('、') || '无'}`
+  )).join('\n')
+
+  const fallbackPrompt = `${prompt || '请根据图片可见事实给出安全生产检查低可信参考'}
+【企业信息】${enterpriseText}
+【待补充判断的图片事实】
+${factLines}
+
+【任务边界】
+1. 当前未命中本地隐患规则和已校验法规条文，你只能输出“低可信 AI 参考”。
+2. 不得编造任何法规名称、标准编号、条款号、处罚结论或检测结果。
+3. 不得输出“重大隐患”或“疑似重大隐患”的正式结论，只能使用“需人工复核”。
+4. 只能依据已给出的图片可见事实和用户补充要求，不能假设现场台账、审批、检测、培训或制度落实情况。
+5. 输出必须稳定、克制、可复核。
+
+【返回格式】
+请只返回合法 JSON，不要 Markdown，不要代码块：
+{
+  "items": [
+    {
+      "image_id": 1,
+      "hazard_description": "基于图片事实的低可信风险描述",
+      "suggestion": "保守整改建议",
+      "uncertain_points": ["需人工补充确认的信息"]
+    }
+  ],
+  "general_suggestions": "整体人工复核建议"
+}`
+
+  console.log(`[AIService] Low-confidence fallback using model: ${modelName}`)
+  const response = await client.chat.completions.create({
+    model: modelName,
+    messages: [
+      { role: 'system', content: C.SYSTEM_PROMPT },
+      { role: 'user', content: fallbackPrompt },
+    ],
+    max_tokens: C.AI_DEFAULT_MAX_TOKENS,
+    temperature: C.AI_INSPECTION_TEMPERATURE,
+  })
+  const raw = normalizeAIResultContent(response.choices[0].message.content, false)
+  const parsed = parseJsonFromText(raw)
+  return {
+    items: Array.isArray(parsed.items) ? parsed.items : [],
+    general_suggestions: normalizeValue(parsed.general_suggestions || ''),
+  }
+}
 const aiService = {
   /**
    * AI 处理入口（通用）
@@ -499,11 +557,33 @@ ${imageMetaText}
         temperature: C.AI_INSPECTION_TEMPERATURE,
       })
       const factExtraction = normalizeAIResultContent(response.choices[0].message.content, true)
-      const assessment = await hazardAssessmentService.assess({
+      let assessment = await hazardAssessmentService.assess({
         factExtraction,
         imageCount: images.length,
         enterprise,
+        prompt,
       })
+
+      if (Array.isArray(assessment.pending_fallback_images) && assessment.pending_fallback_images.length) {
+        try {
+          const fallback = await generateLowConfidenceFallback({
+            client,
+            modelName,
+            prompt,
+            enterprise,
+            pendingImages: assessment.pending_fallback_images,
+          })
+          assessment = mergeLowConfidenceFallback(assessment, fallback)
+        } catch (fallbackError) {
+          console.warn('[AIService] Low-confidence fallback degraded to local placeholder:', fallbackError.message)
+          assessment = mergeLowConfidenceFallback(assessment, {
+            items: [],
+            general_suggestions: '低可信 AI 兜底调用失败，系统已返回基于图片可见事实的低可信占位结果，请人工复核。',
+          })
+        }
+      }
+
+      delete assessment.pending_fallback_images
       const result = JSON.stringify(assessment, null, 2)
       console.log('[AIService] Hazard rule assessment completed.')
       return { result, sessionId, knowledgeRefs: assessment.legal_refs || [], assessment }
@@ -607,3 +687,6 @@ ${clauseContext}
 }
 
 module.exports = aiService
+
+
+

@@ -1,3 +1,37 @@
+﻿# PR23：分级可信分析与前端可信度展示（2026-06-29）
+
+## 变更范围
+
+- 后端分析主链路升级为 `high / medium / low / non_business` 四类结果。
+- `inspection_reports` 保存可信度与依据来源快照：`confidence_level`、`analysis_basis_type`、`fallback_used`、`basis_notice`。
+- `/api/hazard/analyze`、`/api/history/update-result`、历史会话回放统一返回可信度字段。
+- 前端分析页新增可信度标签、依据来源说明、报告提示文案。
+- 中低可信报告允许生成，但会在确认前明确提示需人工复核；非业务图片继续禁止生成报告。
+
+## 验证记录
+
+| 测试用例 | 实际结果 | 状态 |
+|---|---|---|
+| 后端语法检查 | `npm --prefix project/backend run check` 通过，`[syntax-check] passed: 72 files` | 通过 |
+| 后端自动化测试 | `npm --prefix project/backend test` 通过，47 个用例全部通过 | 通过 |
+| 前端 H5 构建 | `npm --prefix project/uni-app-frontend run build:h5` 通过，输出 `DONE Build complete` | 通过 |
+
+## 本轮新增覆盖点
+
+| 测试点 | 预期结果 | 状态 |
+|---|---|---|
+| 非业务图片 | 返回 `non_business` 且禁止生成报告 | 已通过 |
+| 无规则但命中本地条文 | 返回 `medium / local_clause` | 已通过 |
+| 命中本地启用规则 | 返回 `high / local_rule` | 已通过 |
+| 无规则无条文 | 返回 `low / ai_fallback` | 已通过 |
+| `/api/hazard/analyze` | 返回可信度与依据说明字段 | 已通过 |
+
+## 遗留说明
+
+- 当前“低可信”仍是不联网的 AI 兜底参考；外部联网搜索仅预留到后续阶段。
+- PR24 仍需继续补知识库说明页、规则库说明页和更完整的前端引导文案。
+- PR25 仍需继续补报告模板中的可信度展示、管理端筛选和文档归档收口。
+
 # PR19：场景门控与规则驱动初判
 
 ## 变更范围
@@ -1198,3 +1232,4 @@
 
 - 本地数据库当前可能仍停留在旧的 408 条法律/条例状态；合并后需执行 `npm --prefix project/backend run import:legal-clauses -- project/database/legal_clause_official.csv`，确认正式条文接近 1666 条，并能搜索 GB 2811、GB 4351、GB 17945、GB 35181、GB 45067、GB 46768。
 - 若数据库中已有旧种子规则，需要重新执行“导入种子规则”，用更具体的 GB 标准条款刷新既有规则依据。
+
