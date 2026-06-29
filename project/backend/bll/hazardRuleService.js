@@ -227,14 +227,24 @@ const hazardRuleService = {
       updated_rules: 0,
       activated_rules: 0,
       skipped_without_clause: 0,
+      deactivated_rules: 0,
       items: [],
     }
 
     for (const seed of HAZARD_RULE_SEED_PACK) {
+      const existing = await hazardRuleDal.findBySeedKey(seed.seed_key)
       const categoryId = categoryMap.get(seed.category_name)
       if (!categoryId) {
         summary.skipped_without_clause += 1
-        summary.items.push({ seed_key: seed.seed_key, status: 'skipped', message: '分类不存在' })
+        if (existing) {
+          await hazardRuleDal.updateById(existing.id, { is_active: false }, [])
+          summary.deactivated_rules += 1
+        }
+        summary.items.push({
+          seed_key: seed.seed_key,
+          status: existing ? 'deactivated' : 'skipped',
+          message: existing ? '分类不存在，已停用旧规则并清空旧依据' : '分类不存在',
+        })
         continue
       }
 
@@ -253,7 +263,15 @@ const hazardRuleService = {
       const canActivate = clauseIds.length > 0
       if (!canActivate) {
         summary.skipped_without_clause += 1
-        summary.items.push({ seed_key: seed.seed_key, status: 'skipped', message: '未找到已校验依据条文' })
+        if (existing) {
+          await hazardRuleDal.updateById(existing.id, { is_active: false }, [])
+          summary.deactivated_rules += 1
+        }
+        summary.items.push({
+          seed_key: seed.seed_key,
+          status: existing ? 'deactivated' : 'skipped',
+          message: existing ? '未找到已校验依据条文，已停用旧规则并清空旧依据' : '未找到已校验依据条文',
+        })
         continue
       }
 
@@ -272,7 +290,6 @@ const hazardRuleService = {
         status: 'active',
       }
 
-      const existing = await hazardRuleDal.findBySeedKey(seed.seed_key)
       if (existing) {
         await hazardRuleDal.updateById(existing.id, rulePayload, clauseIds)
         summary.updated_rules += 1

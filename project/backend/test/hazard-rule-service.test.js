@@ -241,3 +241,44 @@ test('安全帽种子规则允许从劳动防护相关分类补充检索依据',
     restorePatches()
   }
 })
+
+
+test('种子规则本次找不到合法依据时会停用旧规则并清空旧条文关联', async () => {
+  const categories = [
+    { id: 4, name: '建筑施工安全' },
+    { id: 5, name: '消防安全' },
+    { id: 6, name: '特种设备安全' },
+    { id: 8, name: '工贸行业安全' },
+    { id: 12, name: '职业健康与劳动安全' },
+  ]
+  const updates = []
+
+  patch(knowledgeCategoryDal, 'findAll', async () => categories)
+  patch(hazardRuleDal, 'searchVerifiedClausesForSeed', async (params) => (
+    (params.keywords || []).includes('安全帽') ? [] : [{ id: 31 }, { id: 32 }]
+  ))
+  patch(hazardRuleDal, 'findBySeedKey', async (seedKey) => createRuleRecord({
+    id: seedKey.length,
+    seed_key: seedKey,
+  }))
+  patch(hazardRuleDal, 'updateById', async (id, payload, clauseIds) => {
+    updates.push({ id, payload, clauseIds })
+  })
+  patch(hazardRuleDal, 'create', async () => {
+    throw new Error('不应创建新规则')
+  })
+
+  try {
+    const summary = await hazardRuleService.importSeedPack()
+    const helmetItem = summary.items.find((item) => item.seed_key === 'helmet_not_worn')
+    assert.ok(summary.deactivated_rules >= 1)
+    assert.equal(helmetItem.status, 'deactivated')
+    assert.ok(typeof helmetItem.message === 'string' && helmetItem.message.length > 0)
+
+    const helmetUpdate = updates.find((item) => item.id === 'helmet_not_worn'.length && Array.isArray(item.clauseIds) && item.clauseIds.length === 0)
+    assert.ok(helmetUpdate)
+    assert.equal(helmetUpdate.payload.is_active, false)
+  } finally {
+    restorePatches()
+  }
+})
