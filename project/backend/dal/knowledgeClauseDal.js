@@ -1,4 +1,28 @@
-const db = require('./db')
+﻿const db = require('./db')
+const { ACTIVE_LEGAL_CLAUSE_STATUSES } = require('../common/legalClauseStatus')
+
+const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_LEGAL_CLAUSE_STATUSES.map(() => '?').join(', ')
+
+/** 统计关键词在条文中的命中权重，供本地法规兜底排序使用 */
+const calculateClauseMatchScore = (row = {}, keywords = []) => {
+  const haystacks = {
+    source_title: String(row.source_title || ''),
+    source_code: String(row.source_code || ''),
+    clause_no: String(row.clause_no || ''),
+    content: String(row.content || ''),
+    keywords: String(row.keywords || ''),
+  }
+  return keywords.reduce((score, keyword) => {
+    if (!keyword) return score
+    let current = score
+    if (haystacks.keywords.includes(keyword)) current += 5
+    if (haystacks.content.includes(keyword)) current += 4
+    if (haystacks.clause_no.includes(keyword)) current += 2
+    if (haystacks.source_title.includes(keyword)) current += 2
+    if (haystacks.source_code.includes(keyword)) current += 1
+    return current
+  }, 0)
+}
 
 const CLAUSE_INSERT_SQL = `
   INSERT INTO knowledge_clauses
@@ -181,7 +205,7 @@ const knowledgeClauseDal = {
     return rows
   },
 
-  /** 按 ID 批量查询已校验、现行有效的正式条文 */
+  /** 按 ID 批量查询已校验、现行状态的正式条文 */
   async findVerifiedActiveByIds(ids = []) {
     const clauseIds = Array.from(new Set(
       ids.map((item) => Number(item || 0)).filter((item) => item > 0)
@@ -196,9 +220,9 @@ const knowledgeClauseDal = {
        WHERE kc.id IN (${placeholders})
          AND kc.status = 'active'
          AND kc.verification_status = 'verified'
-         AND kc.current_status = '现行有效'
+         AND kc.current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})
        ORDER BY kc.source_title ASC, kc.sort ASC, kc.id ASC`,
-      clauseIds
+      [...clauseIds, ...ACTIVE_LEGAL_CLAUSE_STATUSES]
     )
     return rows
   },
@@ -261,6 +285,90 @@ const knowledgeClauseDal = {
       const matchKeyword = cleanedKeywords.find((keyword) => haystack.includes(keyword)) || cleanedKeywords[0] || null
       return { ...row, match_keyword: matchKeyword }
     })
+  },
+
+  /**
+   * 按关键词检索“已校验 + 现行状态 + 未归档”的正式条文，
+   * 供 PR23 中可信本地法规参考路径使用。
+   */
+  async searchVerifiedActiveByKeywords({ keywords = [], category_id = null, limit = 8 } = {}) {
+    const cleanedKeywords = Array.from(new Set(
+      keywords
+        .map((item) => String(item || '').trim())
+        .filter((item) => item.length >= 2)
+    )).slice(0, 12)
+    if (!cleanedKeywords.length) return []
+
+    const whereParts = []
+    const params = []
+    cleanedKeywords.forEach((keyword) => {
+      const likeValue = `%${keyword}%`
+      whereParts.push(`(
+        kc.source_title LIKE ?
+        OR kc.source_code LIKE ?
+        OR kc.source_url LIKE ?
+        OR kc.issuing_authority LIKE ?
+        OR kc.document_type LIKE ?
+        OR kc.clause_no LIKE ?
+        OR kc.content LIKE ?
+        OR kc.keywords LIKE ?
+      )`)
+      params.push(likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue, likeValue)
+    })
+
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 8, 20))
+    const candidateLimit = Math.max(safeLimit * 4, 24)
+    const where = [
+      "kc.status = 'active'",
+      "kc.verification_status = 'verified'",
+      `kc.current_status IN (${ACTIVE_STATUS_PLACEHOLDERS})`,
+      `(${whereParts.join(' OR ')})`,
+    ]
+    const sqlParams = [...ACTIVE_LEGAL_CLAUSE_STATUSES]
+    if (category_id) {
+      where.push('kc.category_id = ?')
+      sqlParams.push(Number(category_id))
+    }
+
+    const [rows] = await db.execute(
+      `SELECT
+         kc.id, kc.knowledge_id, kc.category_id, kc.source_title, kc.source_code, kc.source_url,
+         kc.issuing_authority, kc.document_type, kc.publish_date, kc.effective_date,
+         kc.current_status, kc.verification_status, kc.clause_no, kc.content, kc.keywords, kc.sort,
+         c.name AS category_name
+       FROM knowledge_clauses kc
+       LEFT JOIN knowledge_categories c ON c.id = kc.category_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY kc.source_title ASC, kc.sort ASC, kc.id ASC
+       LIMIT ${candidateLimit}`,
+      [...sqlParams, ...params]
+    )
+
+    return rows
+      .map((row) => {
+        const score = calculateClauseMatchScore(row, cleanedKeywords)
+        const haystack = [
+          row.source_title,
+          row.source_code,
+          row.clause_no,
+          row.content,
+          row.keywords,
+        ].join(' ')
+        const matchKeyword = cleanedKeywords.find((keyword) => haystack.includes(keyword)) || cleanedKeywords[0] || null
+        return {
+          ...row,
+          match_keyword: matchKeyword,
+          match_score: score,
+        }
+      })
+      .filter((row) => row.match_score > 0)
+      .sort((a, b) => (
+        Number(b.match_score || 0) - Number(a.match_score || 0)
+        || String(a.content || '').length - String(b.content || '').length
+        || Number(a.sort || 0) - Number(b.sort || 0)
+        || Number(a.id || 0) - Number(b.id || 0)
+      ))
+      .slice(0, safeLimit)
   },
 }
 

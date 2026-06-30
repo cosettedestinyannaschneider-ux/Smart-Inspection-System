@@ -242,6 +242,27 @@ const evidenceLabel = (value) => ({
 
 const reviewLabel = (value) => (value ? '需人工确认' : '已进入人工确认流程')
 
+const confidenceLabel = (value) => ({
+  high: '高可信',
+  medium: '中可信',
+  low: '低可信',
+  non_business: '非业务图片',
+}[String(value || '')] || '待复核')
+
+const basisTypeLabel = (value) => ({
+  local_rule: '本地启用规则 + 已校验条文',
+  local_clause: '本地法规条文检索参考',
+  ai_fallback: 'AI 低可信参考',
+  external_search: '外部搜索参考',
+  non_business: '非业务图片',
+}[String(value || '')] || '待人工复核')
+
+const reviewStatusLabel = (value) => ({
+  pending: '待确认',
+  confirmed: '已确认',
+  needs_review: '需复核',
+  rejected: '已退回',
+}[String(value || '')] || '待确认')
 const formatRulesSummary = (rules = []) => normalizeRuleRefs(rules)
   .map((rule, index) => `${index + 1}. ${rule.name}${rule.hazard_level ? `（${rule.hazard_level}）` : ''}`)
   .join('；')
@@ -440,7 +461,7 @@ const normalizeEnterprise = (enterprise = {}) => ({
   inspection_date: normalizeText(enterprise.inspection_date),
 })
 
-const buildReportData = ({ prompt, result, imagePaths = [], enterprise }) => {
+const buildReportData = ({ prompt, result, imagePaths = [], enterprise, reportMeta = {} }) => {
   const normalizedEnterprise = normalizeEnterprise(enterprise)
   const parsed = parseResult(result, normalizedEnterprise)
   const items = parsed.items.length
@@ -473,6 +494,21 @@ const buildReportData = ({ prompt, result, imagePaths = [], enterprise }) => {
       }
     : buildFallbackOpinion(items)
 
+  const assessment = parsed.assessment || null
+  const confidenceLevel = normalizeText(reportMeta.confidence_level || assessment?.confidence_level) || 'low'
+  const analysisBasisType = normalizeText(reportMeta.analysis_basis_type || assessment?.analysis_basis_type) || 'ai_fallback'
+  const fallbackUsed = reportMeta.fallback_used === true
+    || Number(reportMeta.fallback_used || 0) === 1
+    || assessment?.fallback_used === true
+  const basisNotice = normalizeText(reportMeta.basis_notice || assessment?.basis_notice)
+  const reviewStatus = normalizeText(reportMeta.review_status) || 'pending'
+  const reviewComment = normalizeText(reportMeta.review_comment)
+  const reportAllowed = reportMeta.report_allowed !== false && assessment?.report_allowed !== false
+  const reportBlockReason = normalizeText(reportMeta.report_block_reason || assessment?.report_block_reason)
+  const taskNo = normalizeText(reportMeta.task_no)
+  const taskInspectionDate = normalizeText(reportMeta.task_inspection_date || reportMeta.inspection_date)
+  const inspectorName = normalizeText(reportMeta.inspector_name || normalizedEnterprise.inspector_name)
+
   return {
     prompt: normalizeText(prompt) || '无',
     enterprise: normalizedEnterprise,
@@ -480,11 +516,26 @@ const buildReportData = ({ prompt, result, imagePaths = [], enterprise }) => {
     referenceStandards: finalStandards,
     comprehensiveOpinion: opinion,
     rawText: parsed.isStructured ? '' : parsed.rawText,
-    assessment: parsed.assessment || null,
+    assessment,
     imagePaths: toImageList(imagePaths),
+    reportMeta: {
+      confidence_level: confidenceLevel,
+      confidence_label: confidenceLabel(confidenceLevel),
+      analysis_basis_type: analysisBasisType,
+      analysis_basis_label: basisTypeLabel(analysisBasisType),
+      fallback_used: fallbackUsed,
+      basis_notice: basisNotice,
+      review_status: reviewStatus,
+      review_status_label: reviewStatusLabel(reviewStatus),
+      review_comment: reviewComment,
+      report_allowed: reportAllowed,
+      report_block_reason: reportBlockReason,
+      task_no: taskNo,
+      inspection_date: taskInspectionDate,
+      inspector_name: inspectorName,
+    },
   }
 }
-
 const formatDateCN = (value) => {
   if (!value) {
     const now = new Date()
@@ -587,6 +638,7 @@ const writeWordReportFromTemplate = async ({ reportData, compilerUnit, auditorNa
     compilerUnit,
     auditorName,
     inspectionDate: formatDateCN(reportData.enterprise.inspection_date),
+    reportMeta: reportData.reportMeta,
   }
 
   try {
@@ -692,7 +744,7 @@ const buildHazardChecklistTable = ({ enterprise, items, imagePaths, referenceSta
   })
 }
 
-const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comprehensiveOpinion, rawText, imagePaths }) => {
+const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comprehensiveOpinion, rawText, imagePaths, reportMeta = {} }) => {
   const projectName = normalizeText(enterprise.project_name)
   const titlePrefix = projectName ? `${enterprise.name} ${projectName}` : enterprise.name
   const children = []
@@ -728,7 +780,7 @@ const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comp
   children.push(sectionHeading('保密公正性声明'))
   children.push(paragraph('为保证安全生产技术咨询服务工作的公正性与有效性，经双方协商，共同做以下承诺：'))
   CONFIDENTIALITY_CLAUSES.forEach((clause, index) => {
-    children.push(paragraph(`${index + 1}. ${clause}`, { size: 22, spacing: { after: 80 } }))
+    children.push(paragraph(`${index + 1} . ${clause}`.replace(' .', '.'), { size: 22, spacing: { after: 80 } }))
   })
   children.push(paragraph('甲方：                              乙方：'))
   children.push(paragraph('签字（盖章）：                      签字（盖章）：'))
@@ -754,34 +806,30 @@ const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comp
   ].forEach((line) => children.push(paragraph(line, { size: 24, spacing: { after: 80 } })))
   children.push(new Paragraph({ children: [new PageBreak()] }))
 
-  children.push(paragraph(enterprise.name, {
-    size: 30,
-    bold: true,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 80 },
-  }))
-  children.push(paragraph(projectName || '项目部', {
-    size: 28,
-    bold: true,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 80 },
-  }))
-  children.push(paragraph(DEFAULT_REPORT_TITLE, {
-    size: 32,
-    bold: true,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 240 },
-  }))
+  children.push(paragraph(enterprise.name, { size: 30, bold: true, alignment: AlignmentType.CENTER, spacing: { after: 80 } }))
+  children.push(paragraph(projectName || '项目部', { size: 28, bold: true, alignment: AlignmentType.CENTER, spacing: { after: 80 } }))
+  children.push(paragraph(DEFAULT_REPORT_TITLE, { size: 32, bold: true, alignment: AlignmentType.CENTER, spacing: { after: 240 } }))
 
   children.push(sectionHeading('一、隐患排查'))
   children.push(sectionHeading('（一） 隐患排查形式', 2))
   children.push(paragraph('现场工作场所及安全办公区域检查。'))
   children.push(paragraph(`此次检查覆盖了${titlePrefix}所有场所。`))
   if (prompt) children.push(paragraph(`排查说明：${prompt}`, { size: 22 }))
+  children.push(valueTable([
+    ['检查任务编号', reportMeta.task_no || '待补充'],
+    ['检查员', reportMeta.inspector_name || enterprise.inspector_name || '待补充'],
+    ['检查日期', formatDateCN(reportMeta.inspection_date || enterprise.inspection_date)],
+    ['可信度等级', reportMeta.confidence_label || confidenceLabel(reportMeta.confidence_level)],
+    ['依据来源类型', reportMeta.analysis_basis_label || basisTypeLabel(reportMeta.analysis_basis_type)],
+    ['人工复核状态', reportMeta.review_status_label || reviewStatusLabel(reportMeta.review_status)],
+  ]))
+  if (reportMeta.basis_notice) children.push(paragraph(`依据说明：${reportMeta.basis_notice}`, { size: 22 }))
+  if (reportMeta.review_comment) children.push(paragraph(`复核意见：${reportMeta.review_comment}`, { size: 22 }))
+  if (reportMeta.report_allowed === false && reportMeta.report_block_reason) children.push(paragraph(`报告限制说明：${reportMeta.report_block_reason}`, { size: 22 }))
 
   children.push(sectionHeading('（二） 检查依据', 2))
   referenceStandards.forEach((item, index) => {
-    children.push(paragraph(`${index + 1}. ${item}；`, { size: 22, spacing: { after: 80 } }))
+    children.push(paragraph(`${index + 1} . ${item}；`.replace(' .', '.'), { size: 22, spacing: { after: 80 } }))
   })
 
   children.push(sectionHeading('（三） 现场问题隐患及整改建议措施清单', 2))
@@ -791,7 +839,7 @@ const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comp
   children.push(sectionHeading('二、隐患排查综合意见'))
   children.push(sectionHeading('（一） 安全管理改进方向及建议', 2))
   comprehensiveOpinion.improvement_directions.forEach((item, index) => {
-    children.push(paragraph(`${index + 1}. ${item.title}`, { bold: true, size: 24 }))
+    children.push(paragraph(`${index + 1} . ${item.title}`.replace(' .', '.'), { bold: true, size: 24 }))
     children.push(paragraph(item.content, { size: 22 }))
   })
   children.push(sectionHeading('（二） 综合建议', 2))
@@ -807,20 +855,13 @@ const buildWordChildren = ({ prompt, enterprise, items, referenceStandards, comp
   return children
 }
 
-const writeWordReport = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName }) => {
-  const reportData = buildReportData({ prompt, result, imagePaths, enterprise })
+const writeWordReport = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName, reportMeta = {} }) => {
+  const reportData = buildReportData({ prompt, result, imagePaths, enterprise, reportMeta })
   const activeTemplatePath = await reportTemplateService.getDefaultTemplateAbsolutePath()
-  const templateWordPath = await writeWordReportFromTemplate({
-    reportData,
-    compilerUnit,
-    auditorName,
-    templatePath: activeTemplatePath,
-  })
+  const templateWordPath = await writeWordReportFromTemplate({ reportData, compilerUnit, auditorName, templatePath: activeTemplatePath })
   if (templateWordPath) return templateWordPath
 
-  const fallbackTemplateWordPath = activeTemplatePath
-    ? await writeWordReportFromTemplate({ reportData, compilerUnit, auditorName })
-    : null
+  const fallbackTemplateWordPath = activeTemplatePath ? await writeWordReportFromTemplate({ reportData, compilerUnit, auditorName }) : null
   if (fallbackTemplateWordPath) return fallbackTemplateWordPath
 
   const fileName = `report_${Date.now()}.docx`
@@ -831,33 +872,13 @@ const writeWordReport = async ({ prompt, result, imagePaths = [], enterprise, co
     styles: {
       default: { document: { run: { font: FONT, size: 24 } } },
       paragraphStyles: [
-        {
-          id: 'Heading1',
-          name: 'Heading 1',
-          basedOn: 'Normal',
-          next: 'Normal',
-          quickFormat: true,
-          run: { size: 30, bold: true, font: FONT },
-          paragraph: { spacing: { before: 220, after: 160 }, outlineLevel: 0 },
-        },
-        {
-          id: 'Heading2',
-          name: 'Heading 2',
-          basedOn: 'Normal',
-          next: 'Normal',
-          quickFormat: true,
-          run: { size: 26, bold: true, font: FONT },
-          paragraph: { spacing: { before: 180, after: 120 }, outlineLevel: 1 },
-        },
+        { id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true, run: { size: 30, bold: true, font: FONT }, paragraph: { spacing: { before: 220, after: 160 }, outlineLevel: 0 } },
+        { id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true, run: { size: 26, bold: true, font: FONT }, paragraph: { spacing: { before: 180, after: 120 }, outlineLevel: 1 } },
       ],
     },
     sections: [{
       properties: { page: { size: { width: A4_WIDTH, height: 16838 } } },
-      children: buildWordChildren({
-        ...reportData,
-        compilerUnit,
-        auditorName,
-      }),
+      children: buildWordChildren({ ...reportData, compilerUnit, auditorName, reportMeta: reportData.reportMeta }),
     }],
   })
 
@@ -865,7 +886,6 @@ const writeWordReport = async ({ prompt, result, imagePaths = [], enterprise, co
   fs.writeFileSync(fullPath, buffer)
   return wordPath.replace(/\\/g, '/')
 }
-
 const writePdfTextBlock = (doc, title, value) => {
   doc.fontSize(13).text(title, { continued: false })
   doc.moveDown(0.2)
@@ -904,21 +924,12 @@ const convertWordToPdf = (wordPath) => {
   return null
 }
 
-const writePdfReportFromWordTemplate = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName }) => {
+const writePdfReportFromWordTemplate = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName, reportMeta = {} }) => {
   try {
-    const wordPath = await writeWordReport({
-      prompt,
-      result,
-      imagePaths,
-      enterprise,
-      compilerUnit,
-      auditorName,
-    })
+    const wordPath = await writeWordReport({ prompt, result, imagePaths, enterprise, compilerUnit, auditorName, reportMeta })
     const pdfPath = convertWordToPdf(wordPath)
     if (pdfPath) {
-      const absoluteWordPath = path.isAbsolute(wordPath)
-        ? wordPath
-        : path.join(__dirname, '..', wordPath)
+      const absoluteWordPath = path.isAbsolute(wordPath) ? wordPath : path.join(__dirname, '..', wordPath)
       try { if (fs.existsSync(absoluteWordPath)) fs.unlinkSync(absoluteWordPath) } catch (error) { /* ignore cleanup errors */ }
       return pdfPath
     }
@@ -928,18 +939,11 @@ const writePdfReportFromWordTemplate = async ({ prompt, result, imagePaths = [],
   return null
 }
 
-const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName }) => {
-  const templatePdfPath = await writePdfReportFromWordTemplate({
-    prompt,
-    result,
-    imagePaths,
-    enterprise,
-    compilerUnit,
-    auditorName,
-  })
+const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, compilerUnit, auditorName, reportMeta = {} }) => {
+  const templatePdfPath = await writePdfReportFromWordTemplate({ prompt, result, imagePaths, enterprise, compilerUnit, auditorName, reportMeta })
   if (templatePdfPath) return templatePdfPath
 
-  const reportData = buildReportData({ prompt, result, imagePaths, enterprise })
+  const reportData = buildReportData({ prompt, result, imagePaths, enterprise, reportMeta })
   const fileName = `report_${Date.now()}.pdf`
   const pdfPath = path.join('uploads', fileName)
   const fullPath = path.join(__dirname, '..', pdfPath)
@@ -957,8 +961,6 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
   pdfDoc.pipe(stream)
 
   const projectName = normalizeText(reportData.enterprise.project_name)
-  const titlePrefix = projectName ? `${reportData.enterprise.name} ${projectName}` : reportData.enterprise.name
-
   const useFont = (name) => {
     if (name === 'bold' && fs.existsSync(boldFontPath)) return pdfDoc.font('bold')
     if (name === 'kai' && fs.existsSync(kaiFontPath)) return pdfDoc.font('kai')
@@ -966,52 +968,25 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
     return pdfDoc.font('Helvetica')
   }
   const addPage = () => pdfDoc.addPage({ margin: 48, size: 'A4' })
-  const writeTitle = (text, size = 16) => {
-    useFont('bold').fontSize(size).text(text, { align: 'center' })
-    pdfDoc.moveDown(0.7)
-    useFont('normal')
-  }
-  const writePara = (text, options = {}) => {
-    useFont(options.bold ? 'bold' : (options.kai ? 'kai' : 'normal'))
-      .fontSize(options.size || 11)
-      .text(text || '待补充', {
-        align: options.align || 'left',
-        indent: options.indent || 0,
-        lineGap: options.lineGap ?? 5,
-      })
+  const writeTitle = (textValue, size = 16) => { useFont('bold').fontSize(size).text(textValue, { align: 'center' }); pdfDoc.moveDown(0.7); useFont('normal') }
+  const writePara = (textValue, options = {}) => {
+    useFont(options.bold ? 'bold' : (options.kai ? 'kai' : 'normal')).fontSize(options.size || 11).text(textValue || '待补充', { align: options.align || 'left', indent: options.indent || 0, lineGap: options.lineGap ?? 5 })
     pdfDoc.moveDown(options.after ?? 0.45)
     useFont('normal')
   }
-  const writeSectionTitle = (text) => {
-    pdfDoc.moveDown(0.3)
-    writePara(text, { bold: true, size: 15, after: 0.25 })
-  }
+  const writeSectionTitle = (textValue) => { pdfDoc.moveDown(0.3); writePara(textValue, { bold: true, size: 15, after: 0.25 }) }
   const drawTableRow = (cells, widths, options = {}) => {
     const startX = pdfDoc.x
     const startY = pdfDoc.y
     const padding = 5
-    const heights = cells.map((cell, index) => {
-      useFont(options.header ? 'bold' : 'normal').fontSize(options.size || 9)
-      return pdfDoc.heightOfString(String(cell || ''), {
-        width: widths[index] - padding * 2,
-        lineGap: 2,
-      }) + padding * 2
-    })
+    const heights = cells.map((cell, index) => { useFont(options.header ? 'bold' : 'normal').fontSize(options.size || 9); return pdfDoc.heightOfString(String(cell || ''), { width: widths[index] - padding * 2, lineGap: 2 }) + padding * 2 })
     const rowHeight = Math.max(options.minHeight || 26, ...heights)
-    if (startY + rowHeight > pdfDoc.page.height - pdfDoc.page.margins.bottom) {
-      addPage()
-    }
+    if (startY + rowHeight > pdfDoc.page.height - pdfDoc.page.margins.bottom) addPage()
     let x = pdfDoc.x
     const y = pdfDoc.y
     cells.forEach((cell, index) => {
       pdfDoc.rect(x, y, widths[index], rowHeight).stroke()
-      useFont(options.header ? 'bold' : 'normal')
-        .fontSize(options.size || 9)
-        .text(String(cell || ''), x + padding, y + padding, {
-          width: widths[index] - padding * 2,
-          lineGap: 2,
-          align: options.align || 'left',
-        })
+      useFont(options.header ? 'bold' : 'normal').fontSize(options.size || 9).text(String(cell || ''), x + padding, y + padding, { width: widths[index] - padding * 2, lineGap: 2, align: options.align || 'left' })
       x += widths[index]
     })
     pdfDoc.x = startX
@@ -1035,9 +1010,7 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
   addPage()
   writeTitle('保密公正性声明', 18)
   writePara('为保证安全生产技术咨询服务工作的公正性与有效性，经双方协商，共同做以下承诺：', { size: 11 })
-  CONFIDENTIALITY_CLAUSES.forEach((clause, index) => {
-    writePara(`${index + 1}. ${clause}`, { size: 10.5 })
-  })
+  CONFIDENTIALITY_CLAUSES.forEach((clause, index) => writePara(`${index + 1} . ${clause}`.replace(' .', '.'), { size: 10.5 }))
   pdfDoc.moveDown(1)
   writePara('甲方：                              乙方：', { size: 11 })
   writePara('签字（盖章）：                      签字（盖章）：', { size: 11 })
@@ -1046,21 +1019,11 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
   addPage()
   writeTitle('服 务 承 诺 书', 18)
   writePara('为确保咨询服务质量到位，最大限度地满足客户要求，并为客户提供增值服务，现做出以下郑重承诺：', { size: 11 })
-  SERVICE_COMMITMENTS.forEach((clause) => {
-    writePara(`★  ${clause}`, { size: 10.5 })
-  })
+  SERVICE_COMMITMENTS.forEach((clause) => writePara(`★  ${clause}`, { size: 10.5 }))
 
   addPage()
   writeTitle('目  录', 18)
-  ;[
-    '一、隐患排查',
-    '    （一）隐患排查形式',
-    '    （二）检查依据',
-    '    （三）现场问题隐患及整改建议措施清单',
-    '二、隐患排查综合意见',
-    '    （一）安全管理改进方向及建议',
-    '    （二）综合建议',
-  ].forEach((line) => writePara(line, { size: 12, after: 0.25 }))
+  ['一、隐患排查', '    （一）隐患排查形式', '    （二）检查依据', '    （三）现场问题隐患及整改建议措施清单', '二、隐患排查综合意见', '    （一）安全管理改进方向及建议', '    （二）综合建议'].forEach((line) => writePara(line, { size: 12, after: 0.25 }))
 
   addPage()
   writeTitle(reportData.enterprise.name, 17)
@@ -1069,26 +1032,22 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
   writeSectionTitle('一、隐患排查')
   writeSectionTitle('（一）隐患排查形式')
   writePara(`本次隐患排查采用资料核对、现场照片识别与安全生产法规标准比对相结合的方式开展。排查说明：${reportData.prompt || '无'}`, { size: 11, indent: 22 })
+  writePara(`检查任务编号：${reportData.reportMeta.task_no || '待补充'}`, { size: 11, indent: 22, after: 0.25 })
+  writePara(`检查员：${reportData.reportMeta.inspector_name || reportData.enterprise.inspector_name || '待补充'}`, { size: 11, indent: 22, after: 0.25 })
+  writePara(`检查日期：${formatDateCN(reportData.reportMeta.inspection_date || reportData.enterprise.inspection_date)}`, { size: 11, indent: 22, after: 0.25 })
+  writePara(`可信度等级：${reportData.reportMeta.confidence_label || confidenceLabel(reportData.reportMeta.confidence_level)}`, { size: 11, indent: 22, after: 0.25 })
+  writePara(`依据来源类型：${reportData.reportMeta.analysis_basis_label || basisTypeLabel(reportData.reportMeta.analysis_basis_type)}`, { size: 11, indent: 22, after: 0.25 })
+  writePara(`人工复核状态：${reportData.reportMeta.review_status_label || reviewStatusLabel(reportData.reportMeta.review_status)}`, { size: 11, indent: 22, after: 0.25 })
+  if (reportData.reportMeta.basis_notice) writePara(`依据说明：${reportData.reportMeta.basis_notice}`, { size: 11, indent: 22, after: 0.25 })
+  if (reportData.reportMeta.review_comment) writePara(`复核意见：${reportData.reportMeta.review_comment}`, { size: 11, indent: 22, after: 0.25 })
+  if (reportData.reportMeta.report_allowed === false && reportData.reportMeta.report_block_reason) writePara(`报告限制说明：${reportData.reportMeta.report_block_reason}`, { size: 11, indent: 22, after: 0.25 })
   writeSectionTitle('（二）检查依据')
-  reportData.referenceStandards.forEach((item, index) => {
-    writePara(`${index + 1}. ${item.endsWith('；') ? item : `${item}；`}`, { size: 11, after: 0.25 })
-  })
+  reportData.referenceStandards.forEach((item, index) => writePara(`${index + 1} . ${item.endsWith('；') ? item : `${item}；`}`.replace(' .', '.'), { size: 11, after: 0.25 }))
 
   writeSectionTitle('（三）现场问题隐患及整改建议措施清单')
-  drawTableRow(
-    ['企业\n地点', '现场存在问题（隐患描述及图片）', '隐患\n等级', '整改建议', '责任\n划分'],
-    [58, 202, 48, 160, 55],
-    { header: true, align: 'center', minHeight: 34, size: 8.6 }
-  )
+  drawTableRow(['企业\n地点', '现场存在问题（隐患描述及图片）', '隐患\n等级', '整改建议', '责任\n划分'], [58, 202, 48, 160, 55], { header: true, align: 'center', minHeight: 34, size: 8.6 })
   reportData.items.forEach((item, index) => {
-    drawTableRow([
-      item.location || projectName || reportData.enterprise.region || '现场',
-      item.hazard_description || '待补充',
-      item.hazard_level || DEFAULT_HAZARD_LEVEL,
-      item.suggestion || '建议结合现场情况补充具体整改措施。',
-      item.responsibility || DEFAULT_RESPONSIBILITY,
-    ], [58, 202, 48, 160, 55], { minHeight: 60, size: 8.4 })
-
+    drawTableRow([item.location || projectName || reportData.enterprise.region || '现场', item.hazard_description || '待补充', item.hazard_level || DEFAULT_HAZARD_LEVEL, item.suggestion || '建议结合现场情况补充具体整改措施。', item.responsibility || DEFAULT_RESPONSIBILITY], [58, 202, 48, 160, 55], { minHeight: 60, size: 8.4 })
     const imagePath = getItemImagePath(item, index, reportData.imagePaths)
     if (imagePath && fs.existsSync(imagePath)) {
       try {
@@ -1096,9 +1055,7 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
         writePara(`隐患图片 ${index + 1}`, { kai: true, size: 10, align: 'center', after: 0.2 })
         pdfDoc.image(imagePath, pdfDoc.page.margins.left + 72, pdfDoc.y, { fit: [360, 210], align: 'center' })
         pdfDoc.y += 220
-      } catch (error) {
-        // ignore image rendering errors
-      }
+      } catch (error) {}
     }
   })
 
@@ -1106,7 +1063,7 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
   writeSectionTitle('二、隐患排查综合意见')
   writeSectionTitle('（一）安全管理改进方向及建议')
   reportData.comprehensiveOpinion.improvement_directions.forEach((item, index) => {
-    writePara(`${index + 1}. ${item.title}`, { bold: true, size: 11 })
+    writePara(`${index + 1} . ${item.title}`.replace(' .', '.'), { bold: true, size: 11 })
     writePara(item.content, { size: 11, indent: 22 })
   })
   writeSectionTitle('（二）综合建议')
@@ -1124,29 +1081,21 @@ const writePdfReport = async ({ prompt, result, imagePaths = [], enterprise, com
     stream.on('error', reject)
   })
 }
-
 const docService = {
-  async generateTemplateReport({ enterprise, prompt, result, imagePaths = [], compilerUnit, auditorName }) {
-    return writeWordReport({ enterprise, prompt, result, imagePaths, compilerUnit, auditorName })
+  async generateTemplateReport({ enterprise, prompt, result, imagePaths = [], compilerUnit, auditorName, reportMeta = {} }) {
+    return writeWordReport({ enterprise, prompt, result, imagePaths, compilerUnit, auditorName, reportMeta })
   },
 
-  async generateTemplatePDF({ enterprise, prompt, result, imagePaths = [], compilerUnit, auditorName, wordPath }) {
+  async generateTemplatePDF({ enterprise, prompt, result, imagePaths = [], compilerUnit, auditorName, wordPath, reportMeta = {} }) {
     if (wordPath) {
       const pdfPath = convertWordToPdf(wordPath)
       if (pdfPath) return pdfPath
     }
-    return writePdfReport({ enterprise, prompt, result, imagePaths, compilerUnit, auditorName })
+    return writePdfReport({ enterprise, prompt, result, imagePaths, compilerUnit, auditorName, reportMeta })
   },
 
   async generateWord(prompt, result, imagePath, options = {}) {
-    return writeWordReport({
-      prompt,
-      result,
-      imagePaths: toImageList(imagePath),
-      enterprise: options.enterprise,
-      compilerUnit: options.compilerUnit,
-      auditorName: options.auditorName,
-    })
+    return writeWordReport({ prompt, result, imagePaths: toImageList(imagePath), enterprise: options.enterprise, compilerUnit: options.compilerUnit, auditorName: options.auditorName, reportMeta: options.reportMeta })
   },
 
   async generatePDF(prompt, result, imagePath, options = {}) {
@@ -1154,15 +1103,7 @@ const docService = {
       const pdfPath = convertWordToPdf(options.wordPath)
       if (pdfPath) return pdfPath
     }
-    return writePdfReport({
-      prompt,
-      result,
-      imagePaths: toImageList(imagePath),
-      enterprise: options.enterprise,
-      compilerUnit: options.compilerUnit,
-      auditorName: options.auditorName,
-    })
+    return writePdfReport({ prompt, result, imagePaths: toImageList(imagePath), enterprise: options.enterprise, compilerUnit: options.compilerUnit, auditorName: options.auditorName, reportMeta: options.reportMeta })
   },
 }
-
 module.exports = docService

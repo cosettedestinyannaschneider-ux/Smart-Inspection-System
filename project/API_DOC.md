@@ -1,4 +1,4 @@
-# 智检系统 API 接口文档
+﻿# 智检系统 API 接口文档
 
 基础路径：`http://localhost:3000`
 
@@ -1107,3 +1107,4 @@ AI 规则草稿约束：
 - `GET /api/hazard/images/list` 支持 `inspection_task_id` 查询参数。
 - `POST /api/hazard/analyze` 新增必填 `inspection_task_id`。
 - 后端会校验所选图片必须属于同一个检查任务和同一个客户企业，避免跨企业、跨任务混选。
+

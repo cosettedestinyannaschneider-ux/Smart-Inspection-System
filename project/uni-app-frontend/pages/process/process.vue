@@ -168,11 +168,15 @@
                       </text>
                     </view>
                     <view class="assessment-tags">
+                      <text class="assessment-tag" :class="confidenceClass(parseStructuredData(msg.content).confidence_level)">可信度：{{ confidenceText(parseStructuredData(msg.content).confidence_level) }}</text>
+                      <text class="assessment-tag">依据：{{ basisTypeText(parseStructuredData(msg.content).analysis_basis_type) }}</text>
                       <text class="assessment-tag">等级：{{ parseStructuredData(msg.content).hazard_level || '需人工复核' }}</text>
                       <text class="assessment-tag">证据：{{ evidenceText(parseStructuredData(msg.content).evidence_sufficiency) }}</text>
                       <text class="assessment-tag">{{ parseStructuredData(msg.content).review_required ? '需人工确认' : '可进入报告' }}</text>
                     </view>
                     <text v-if="parseStructuredData(msg.content).scene_reason" class="assessment-reason">{{ parseStructuredData(msg.content).scene_reason }}</text>
+                    <text v-if="parseStructuredData(msg.content).basis_notice" class="assessment-notice">{{ parseStructuredData(msg.content).basis_notice }}</text>
+                    <text v-if="reportHintText(parseStructuredData(msg.content))" class="assessment-hint">{{ reportHintText(parseStructuredData(msg.content)) }}</text>
                     <text v-if="parseStructuredData(msg.content).report_allowed === false" class="assessment-block">{{ parseStructuredData(msg.content).report_block_reason || '当前结果不生成正式报告。' }}</text>
                     <view v-if="parseStructuredData(msg.content).visible_facts.length" class="fact-row">
                       <text v-for="(fact, factIndex) in parseStructuredData(msg.content).visible_facts.slice(0, 6)" :key="factIndex" class="fact-chip">{{ fact }}</text>
@@ -218,7 +222,7 @@
                     <view v-if="getDisplayKnowledgeRefs(msg).length || parseStructuredData(msg.content).reference_standards.length" class="reference-panel">
                       <view class="reference-header">
                         <text class="reference-title">引用依据</text>
-                        <text class="reference-subtitle">{{ getDisplayKnowledgeRefs(msg).length ? '来自本地知识库命中条款' : '来自 AI 返回的待复核依据' }}</text>
+                        <text class="reference-subtitle">{{ referenceSubtitle(msg, parseStructuredData(msg.content)) }}</text>
                       </view>
                       <view v-for="(ref, refIndex) in getDisplayKnowledgeRefs(msg)" :key="'knowledge-ref-' + refIndex" class="reference-item">
                         <text class="reference-name">{{ formatKnowledgeRefTitle(ref) }}</text>
@@ -847,6 +851,10 @@ const attachAssessmentFields = (target, data) => ({
   report_allowed: data.report_allowed,
   report_block_reason: data.report_block_reason || '',
   review_status: data.review_status || '',
+  confidence_level: data.confidence_level || '',
+  analysis_basis_type: data.analysis_basis_type || '',
+  fallback_used: data.fallback_used === true || data.fallback_used === 1 || data.fallback_used === '1',
+  basis_notice: data.basis_notice || '',
 })
 
 /** 场景状态展示文案 */
@@ -862,9 +870,35 @@ const sceneStatusText = (status) => {
 }
 
 /** 场景状态样式 */
+/** 场景状态样式 */
 const sceneStatusClass = (status) => `scene-${String(status || 'uncertain')}`
 
-/** 证据充分性展示文案 */
+/** 可信度展示文案 */
+const confidenceText = (level) => {
+  const map = {
+    high: '高可信',
+    medium: '中可信',
+    low: '低可信',
+    non_business: '非业务图片',
+  }
+  return map[String(level || 'low')] || '待复核'
+}
+
+/** 可信度标签样式 */
+const confidenceClass = (level) => `confidence-${String(level || 'low')}`
+
+/** 依据来源展示文案 */
+const basisTypeText = (type) => {
+  const map = {
+    local_rule: '本地规则+条文',
+    local_clause: '本地法规参考',
+    ai_fallback: 'AI 低可信参考',
+    external_search: '外部搜索参考',
+    non_business: '非业务图片',
+  }
+  return map[String(type || 'ai_fallback')] || '待人工复核'
+}
+
 const evidenceText = (status) => {
   const map = {
     sufficient: '充分',
@@ -932,8 +966,33 @@ const buildAssessmentFieldsForSave = (data = {}) => ({
   report_allowed: data.report_allowed,
   report_block_reason: data.report_block_reason || '',
   review_status: data.review_status || '',
+  confidence_level: data.confidence_level || '',
+  analysis_basis_type: data.analysis_basis_type || '',
+  fallback_used: data.fallback_used === true || data.fallback_used === 1 || data.fallback_used === '1',
+  basis_notice: data.basis_notice || '',
 })
 
+/** 报告提示文案，帮助检查员理解不同可信度的边界 */
+const reportHintText = (data = {}) => {
+  const level = String(data.confidence_level || '')
+  if (level === 'high') return '本次结果命中本地启用规则和已校验条文，可作为高可信初判，正式报告仍需人工确认。'
+  if (level === 'medium') return '本次结果仅命中本地法规条文，未命中正式规则；允许生成报告，但必须人工复核。'
+  if (level === 'low') return '本次结果未找到本地规则或条文依据，仅提供低可信 AI 参考；生成报告时会明确标记。'
+  if (level === 'non_business') return '当前图片不属于安全生产检查场景，不生成安全隐患报告。'
+  return ''
+}
+
+/** 引用依据区副标题 */
+const referenceSubtitle = (msg, data = {}) => {
+  if (getDisplayKnowledgeRefs(msg).length) {
+    const type = String(data.analysis_basis_type || '')
+    if (type === 'local_rule') return '来自本地启用规则关联的正式条文快照'
+    if (type === 'local_clause') return '来自本地法规条文检索参考'
+    return '来自本地知识库已保存条文快照'
+  }
+  if (String(data.analysis_basis_type || '') === 'ai_fallback') return '当前未命中本地依据，以下为 AI 返回的待复核参考'
+  return '来自 AI 返回的待复核依据'
+}
 const canConfirmReport = (msg) => {
   if (!msg?.id || msg.wordPath || msg.pdfPath) return false
   if (isReportBlocked(msg)) return false
@@ -952,26 +1011,45 @@ const applyReviewResponse = (msg, data = {}) => {
   msg.report_block_reason = data.report_block_reason || msg.report_block_reason
   msg.wordPath = data.wordPath || null
   msg.pdfPath = data.pdfPath || null
+  msg.confidence_level = data.confidence_level || msg.confidence_level
+  msg.analysis_basis_type = data.analysis_basis_type || msg.analysis_basis_type
+  msg.fallback_used = data.fallback_used ?? msg.fallback_used
+  msg.basis_notice = data.basis_notice || msg.basis_notice
 }
 
 const confirmReport = (msg) => {
   if (!msg.id || reviewingResult.value) return
-  reviewingResult.value = true
-  request({
-    url: apiUrl('/api/history/review/confirm'),
-    method: 'POST',
-    data: { id: msg.id },
-  }).then((res) => {
-    if (res.data?.success) {
-      applyReviewResponse(msg, res.data)
-      uni.showToast({ title: '正式报告已生成', icon: 'success' })
-    } else {
-      uni.showToast({ title: res.data?.message || '确认失败', icon: 'none' })
-    }
-  }).catch(() => {
-    uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
-  }).finally(() => {
-    reviewingResult.value = false
+  const data = parseStructuredData(msg.content) || {}
+  const level = String(data.confidence_level || msg.confidence_level || '')
+  const modalTitle = level === 'low' ? '低可信报告确认' : (level === 'medium' ? '中可信报告确认' : '生成正式报告')
+  const modalContent = level === 'low'
+    ? '当前结果仅为低可信 AI 参考，未命中本地规则或条文依据。生成报告后会明确标记“低可信参考，需人工复核”。确认继续？'
+    : (level === 'medium'
+      ? '当前结果仅命中本地法规条文，未命中正式隐患规则。生成报告后会明确标记“本地法规参考，需人工复核”。确认继续？'
+      : '确认基于当前分析结果生成正式报告？')
+  uni.showModal({
+    title: modalTitle,
+    content: modalContent,
+    success: (modalRes) => {
+      if (!modalRes.confirm) return
+      reviewingResult.value = true
+      request({
+        url: apiUrl('/api/history/review/confirm'),
+        method: 'POST',
+        data: { id: msg.id },
+      }).then((res) => {
+        if (res.data?.success) {
+          applyReviewResponse(msg, res.data)
+          uni.showToast({ title: '正式报告已生成', icon: 'success' })
+        } else {
+          uni.showToast({ title: res.data?.message || '确认失败', icon: 'none' })
+        }
+      }).catch(() => {
+        uni.showToast({ title: '网络错误，请稍后重试', icon: 'none' })
+      }).finally(() => {
+        reviewingResult.value = false
+      })
+    },
   })
 }
 
@@ -1423,6 +1501,10 @@ const loadTaskHistory = async (taskId, expectedVersion = taskContextVersion.valu
         review_required: item.review_required,
         reportAllowed: item.report_allowed,
         reportBlockReason: item.report_block_reason,
+        confidence_level: item.confidence_level,
+        analysis_basis_type: item.analysis_basis_type,
+        fallback_used: item.fallback_used,
+        basis_notice: item.basis_notice,
         isEditing: false,
         editData: null,
       },
@@ -1556,6 +1638,10 @@ const loadSession = async (sessionId, expectedVersion = taskContextVersion.value
             review_required: item.review_required,
             reportAllowed: item.report_allowed,
             reportBlockReason: item.report_block_reason,
+            confidence_level: item.confidence_level,
+            analysis_basis_type: item.analysis_basis_type,
+            fallback_used: item.fallback_used,
+            basis_notice: item.basis_notice,
             isEditing: false,
             editData: null
           }
@@ -1698,6 +1784,10 @@ const handleResponse = (data) => {
       review_required: data.review_required,
       reportAllowed: data.report_allowed,
       reportBlockReason: data.report_block_reason,
+      confidence_level: data.confidence_level,
+      analysis_basis_type: data.analysis_basis_type,
+      fallback_used: data.fallback_used,
+      basis_notice: data.basis_notice,
       isEditing: false,
       editData: null
     }
@@ -3170,7 +3260,9 @@ const goToAdmin = () => {
 }
 
 .assessment-reason,
-.assessment-block {
+.assessment-block,
+.assessment-notice,
+.assessment-hint {
   display: block;
   margin-top: 10px;
   color: #52627b;
@@ -3178,8 +3270,36 @@ const goToAdmin = () => {
   line-height: 1.6;
 }
 
+.assessment-notice {
+  color: #1d4ed8;
+}
+
+.assessment-hint {
+  color: #475569;
+}
+
 .assessment-block {
   color: #b45309;
+}
+
+.confidence-high {
+  background: #eaf7ef;
+  color: #17835b;
+}
+
+.confidence-medium {
+  background: #fff7e8;
+  color: #b7791f;
+}
+
+.confidence-low {
+  background: #fff1f0;
+  color: #c2410c;
+}
+
+.confidence-non_business {
+  background: #f3f4f6;
+  color: #4b5563;
 }
 
 .fact-chip {

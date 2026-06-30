@@ -1,4 +1,4 @@
-const express = require('express')
+﻿const express = require('express')
 const cors = require('cors')
 const multer = require('multer')
 const fs = require('fs')
@@ -343,20 +343,28 @@ const parseReportResult = (result) => {
   catch { return null }
 }
 
-/** 从结构化分析结果推断复核与正式报告生成状态 */
+/** 提取可信度、依据来源和兜底说明快照 */
+const extractAssessmentSnapshot = (assessment) => ({
+  confidenceLevel: assessment?.confidence_level || 'low',
+  analysisBasisType: assessment?.analysis_basis_type || 'ai_fallback',
+  fallbackUsed: assessment?.fallback_used === true || Number(assessment?.fallback_used || 0) === 1,
+  basisNotice: assessment?.basis_notice || '',
+})
+
+/** 根据分析结果生成报告复核状态 */
 const buildReviewStateFromAssessment = (assessment) => {
   const reportAllowed = assessment?.report_allowed !== false
   const reviewRequired = assessment?.review_required !== false
-  const blockReason = assessment?.report_block_reason || (reviewRequired ? 'AI 初判结果需要人工确认后才能生成正式报告。' : '')
+  const blockReason = assessment?.report_block_reason || (reviewRequired ? 'AI 初判结果需人工确认后方可形成正式结论' : '')
   return {
     reportAllowed,
     reviewRequired,
     reviewStatus: reportAllowed ? C.REPORT_REVIEW_PENDING : C.REPORT_REVIEW_NEEDS_REVIEW,
     reportBlockReason: blockReason,
+    ...extractAssessmentSnapshot(assessment),
   }
 }
 
-/** 从分析结果中提取命中规则快照 */
 const extractRuleRefsFromAssessment = (assessment) => {
   const rules = Array.isArray(assessment?.matched_rules) ? assessment.matched_rules : []
   const itemRules = Array.isArray(assessment?.items)
@@ -387,6 +395,20 @@ const resolveReportImagePaths = async (reportId) => {
 const generateFormalReportForRecord = async (record, resultOverride = null) => {
   const result = resultOverride || record.result || ''
   const reportImages = await resolveReportImagePaths(record.id)
+  const task = record.inspection_task_id ? await inspectionTaskDal.findById(record.inspection_task_id) : null
+  const reportMeta = {
+    confidence_level: record.confidence_level,
+    analysis_basis_type: record.analysis_basis_type,
+    fallback_used: record.fallback_used,
+    basis_notice: record.basis_notice,
+    review_status: record.review_status,
+    review_comment: record.review_comment,
+    report_allowed: Number(record.report_allowed) !== 0,
+    report_block_reason: record.report_block_reason,
+    task_no: task?.task_no || '',
+    task_inspection_date: task?.inspection_date || '',
+    inspector_name: task?.inspector_name || '',
+  }
   let wordPath = null
   let pdfPath = null
   if (record.enterprise_id) {
@@ -397,6 +419,7 @@ const generateFormalReportForRecord = async (record, resultOverride = null) => {
         prompt: record.prompt,
         result,
         imagePaths: reportImages,
+        reportMeta,
       })
       pdfPath = await docService.generateTemplatePDF({
         enterprise,
@@ -404,17 +427,19 @@ const generateFormalReportForRecord = async (record, resultOverride = null) => {
         result,
         imagePaths: reportImages,
         wordPath,
+        reportMeta,
       })
     }
   }
-  if (!wordPath) wordPath = await docService.generateWord(record.prompt, result, reportImages)
-  if (!pdfPath) pdfPath = await docService.generatePDF(record.prompt, result, reportImages, { wordPath })
+  if (!wordPath) wordPath = await docService.generateWord(record.prompt, result, reportImages, { reportMeta })
+  if (!pdfPath) pdfPath = await docService.generatePDF(record.prompt, result, reportImages, { wordPath, reportMeta })
   await historyDal.updateReportFiles(record.id, wordPath, pdfPath)
   return { wordPath, pdfPath }
 }
-/** 将数据库记录中的文件路径转为当前接口应暴露的受控地址 */
+/** ?????????????????????????? */
 const mapHistoryRecordForClient = (req, record, knowledgeRefs = [], ruleRefs = []) => ({
   ...record,
+  fallback_used: Number(record.fallback_used || 0) === 1,
   image_path: record.image_path ? buildReportImagePreviewUrl(req, record.id) : null,
   knowledge_refs: mapKnowledgeRefsForClient(knowledgeRefs),
   rule_refs: mapRuleRefsForClient(ruleRefs),
@@ -809,6 +834,10 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       reviewRequired: reviewState.reviewRequired,
       reportAllowed: reviewState.reportAllowed,
       reportBlockReason: reviewState.reportBlockReason,
+      confidenceLevel: reviewState.confidenceLevel,
+      analysisBasisType: reviewState.analysisBasisType,
+      fallbackUsed: reviewState.fallbackUsed,
+      basisNotice: reviewState.basisNotice,
     })
 
     await inspectionReportImageDal.linkImages(historyId, imageIds)
@@ -833,6 +862,10 @@ app.post('/api/hazard/analyze', requireAuth, requirePermission('analysis:run'), 
       report_block_reason: reviewState.reportBlockReason,
       review_status: reviewState.reviewStatus,
       review_required: reviewState.reviewRequired,
+      confidence_level: reviewState.confidenceLevel,
+      analysis_basis_type: reviewState.analysisBasisType,
+      fallback_used: reviewState.fallbackUsed,
+      basis_notice: reviewState.basisNotice,
       rule_refs: mapRuleRefsForClient(ruleRefs),
       ...buildReportDownloadUrls(req, historyId, null, null),
     })
@@ -1028,6 +1061,12 @@ app.post('/api/history/update-result', requireAuth, requirePermission('analysis:
       reviewStatus: reviewState.reviewStatus,
       reviewRequired: reviewState.reviewRequired,
       reviewComment: '分析结果已编辑，需重新人工确认后生成正式报告。',
+      reportAllowed: reviewState.reportAllowed,
+      reportBlockReason: reviewState.reportBlockReason,
+      confidenceLevel: reviewState.confidenceLevel,
+      analysisBasisType: reviewState.analysisBasisType,
+      fallbackUsed: reviewState.fallbackUsed,
+      basisNotice: reviewState.basisNotice,
     })
     await inspectionReportKnowledgeRefDal.replaceByReportId(id, parsedAssessment?.legal_refs || parsedAssessment?.reference_standards || [])
     await inspectionReportRuleRefDal.replaceByReportId(id, ruleRefs)
@@ -1039,6 +1078,10 @@ app.post('/api/history/update-result', requireAuth, requirePermission('analysis:
       review_required: reviewState.reviewRequired,
       report_allowed: reviewState.reportAllowed,
       report_block_reason: reviewState.reportBlockReason,
+      confidence_level: reviewState.confidenceLevel,
+      analysis_basis_type: reviewState.analysisBasisType,
+      fallback_used: reviewState.fallbackUsed,
+      basis_notice: reviewState.basisNotice,
       rule_refs: mapRuleRefsForClient(ruleRefs),
     }, '保存成功，正式报告需人工确认后生成')
   } catch (err) {
@@ -1907,3 +1950,14 @@ if (require.main === module) {
 }
 
 module.exports = app
+
+
+
+
+
+
+
+
+
+
+
